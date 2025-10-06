@@ -1,0 +1,10 @@
+streamlit
+sqlalchemy
+psycopg2-binary
+Authlib
+reportlab
+gspread
+PyPDF2
+google-api-python-client
+python-dotenv
+pydrive2
