@@ -1,6 +1,12 @@
 import streamlit as st
 import re
-from database.crud.clientes import insert_client_request, get_profile_id
+from database.crud.clientes import (
+    insert_client_request,
+    insert_customs_registration,
+    insert_port_registration,
+    insert_shipping_line_registration,
+    get_profile_id
+)
 from services.sheets_writer import save_request
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -137,14 +143,33 @@ def forms():
             location=location or None,
             language=language,
             reminder_frequency=reminder_frequency,
+            operation_type=tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
+            commodity=commodity if tipo_solicitud.lower() == "cliente" else None,
+            has_customs=aduana,
+            has_port=puerto,
+            has_shipping_line=linea_naviera,
             requested_by=requested_by,
             requested_by_type=requested_by_type
         )
 
-        # Guardar también en Google Sheets (incluye request_id para trazabilidad)
+        if aduana and tipo_aduana:
+            insert_customs_registration(request_id, tipo_aduana)
+
+        if puerto and terminales_seleccionados:
+            insert_port_registration(request_id, terminales_seleccionados)
+
+        if linea_naviera and tipo_linea:
+            line_data = {}
+            for line in tipo_linea:
+                if line == "MSC":
+                    line_data[line] = datos_msc
+                else:
+                    line_data[line] = {}  # otras líneas sin detalles
+            insert_shipping_line_registration(request_id, line_data)
+
+
         save_request({
             "request_id": request_id,
-            "profile_id": profile_id,
             "tipo_solicitud": tipo_solicitud,
             "company_name": company_name,
             "email": email,
@@ -153,8 +178,42 @@ def forms():
             "language": language,
             "reminder_frequency": reminder_frequency,
             "requested_by": requested_by,
-            "requested_by_type": requested_by_type
+            "requested_by_type": requested_by_type,
+
+            "tipo_operacion": tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
+            "commodity": commodity if tipo_solicitud.lower() == "cliente" else None,
+
+            "aduana": (
+                f"Sí: {', '.join(tipo_aduana)}"
+                if aduana and tipo_aduana
+                else "Sí" if aduana
+                else "No"
+            ),
+
+            "puerto": (
+                "Sí: " + "; ".join(
+                    [f"{p}: {', '.join(t)}" for p, t in terminales_seleccionados.items()]
+                )
+                if puerto and terminales_seleccionados
+                else "Sí" if puerto
+                else "No"
+            ),
+
+            "linea_naviera": (
+                "Sí: " + ", ".join([
+                    f"{linea}" + (
+                        f" (POL: {datos_msc.get('POL')}, POD: {datos_msc.get('POD')}, "
+                        f"Producto: {datos_msc.get('Producto')}, "
+                        f"Contenedor: {datos_msc.get('Tipo de Contenedor')}, "
+                        f"Shipper BL: {datos_msc.get('Shipper en BL')})"
+                        if linea == "MSC" and datos_msc else ""
+                    )
+                    for linea in tipo_linea
+                ])
+                if linea_naviera and tipo_linea
+                else "Sí" if linea_naviera
+                else "No"
+            )
         })
 
-        # Feedback
         st.success(f"✅ Solicitud guardada correctamente")

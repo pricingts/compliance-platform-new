@@ -35,10 +35,24 @@ def get_or_create_worksheet(sheet_name: str, headers: list = None):
 
 def save_request(request_info: dict):
 
-    headers = ["Fecha", "Solicitante", "Tipo de perfil", "Nombre Compañia", "Nombre Completo", "Cedula", "Correo", "Cuenta Trading", "Direccion", "Idioma", "Frecuencia Recordatorio"]
+    headers = [
+        "Fecha",
+        "Solicitante",
+        "Tipo de solicitud",
+        "Nombre Compañía",
+        "Correo",
+        "Cuenta Trading",
+        "País / Ubicación",
+        "Idioma",
+        "Frecuencia Recordatorio",
+        "Tipo de Operación",
+        "Commodity",
+        "Aduana",
+        "Puerto",
+        "Línea Naviera"
+    ]
 
     ws = get_or_create_worksheet("Solicitudes de Creacion", headers)
-
     if not ws:
         return
 
@@ -47,16 +61,20 @@ def save_request(request_info: dict):
 
     row = [
         fecha_creacion,
-        request_info.get("requested_by", ""),
-        request_info.get("tipo_solicitud", ""),
-        request_info.get("company_name", ""),
-        request_info.get("nombre_completo", ""),
-        request_info.get("cedula", ""),
-        request_info.get("email", ""),
-        request_info.get("trading", ""),
-        request_info.get("location", ""),
-        request_info.get("language", ""),
-        request_info.get("reminder_frequency", ""),
-
+        request_info.get("requested_by", ""),                # Comercial o solicitante
+        request_info.get("tipo_solicitud", ""),              # Cliente / Proveedor
+        request_info.get("company_name", ""),                # Nombre de la compañía
+        request_info.get("email", ""),                       # Correo
+        request_info.get("trading", ""),                     # Trading
+        request_info.get("location", ""),                    # País
+        request_info.get("language", ""),                    # Idioma
+        request_info.get("reminder_frequency", ""),           # Frecuencia de recordatorio
+        request_info.get("tipo_operacion", ""),               # EXPO / IMPO
+        request_info.get("commodity", ""),                    # Producto
+        request_info.get("aduana", ""),                       # Sí/No + detalle de aduana
+        request_info.get("puerto", ""),                       # Sí/No + detalle de puerto
+        request_info.get("linea_naviera", "")                 # Sí/No + detalle de línea naviera
     ]
+
+    # 🔹 Agregar la fila
     ws.append_row(row, value_input_option="USER_ENTERED")

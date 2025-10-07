@@ -41,12 +41,12 @@ with st.sidebar:
     page = st.radio("Go to", allowed_pages, index=0)
 
 if page == "Solicitud de Creación":
-    import views.request as payment
-    payment.show()
+    import views.request as req
+    req.show()
 
 elif page == "Registro de Proveedores/ Clientes":
-    import views.upload_documents as pre
-    pre.show()
+    import views.upload_documents as up
+    up.show()
 
 # elif page == "Progreso":
 #     import views.visualization as nt
