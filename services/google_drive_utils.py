@@ -14,80 +14,68 @@ def init_drive():
     service = build("drive", "v3", credentials=credentials)
     return service
 
-def find_or_create_folder(service, folder_name: str, *, shared_drive_id: str | None = None, parent_folder_id: str | None = None) -> str:
+from googleapiclient.errors import HttpError
+
+def find_or_create_folder(
+    service,
+    folder_name: str,
+    *,
+    entity_type: str,  # "cliente" o "proveedor"
+    base_folder_id: str,  # ID de la carpeta CLIENTE o PROVEEDOR
+) -> str:
     """
-    Si parent_folder_id está definido: trabaja dentro de esa carpeta.
-    Si no, usa shared_drive_id para trabajar en la raíz de la unidad compartida.
+    Busca o crea una carpeta dentro de la carpeta base (CLIENTE o PROVEEDOR) en Google Drive.
+
+    Estructura esperada:
+      base_folder_id/
+        {NombreCliente}/
+      o
+      base_folder_id/
+        {NombreProveedor}/
     """
+
     try:
-        if parent_folder_id:
-            # Buscar dentro de una carpeta específica (carpeta padre)
-            query = (
-                f"name = '{folder_name}' and "
-                f"mimeType = 'application/vnd.google-apps.folder' and "
-                f"trashed = false and "
-                f"'{parent_folder_id}' in parents"
-            )
-            res = service.files().list(
-                q=query,
-                corpora="allDrives",
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-                fields="files(id, name)",
-                pageSize=10,
-            ).execute()
-            files = res.get("files", [])
-            if files:
-                return files[0]["id"]
+        # 1️⃣ Normaliza el nombre de la carpeta
+        folder_name = folder_name.strip()
 
-            metadata = {
-                "name": folder_name,
-                "mimeType": "application/vnd.google-apps.folder",
-                "parents": [parent_folder_id],
-            }
-            folder = service.files().create(
-                body=metadata,
-                supportsAllDrives=True,
-                fields="id"
-            ).execute()
-            return folder["id"]
+        # 2️⃣ Buscar la subcarpeta dentro de la carpeta base
+        query = (
+            f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"and trashed = false and '{base_folder_id}' in parents"
+        )
 
-        if shared_drive_id:
-            # Buscar en la raíz de la unidad compartida
-            query = (
-                f"name = '{folder_name}' and "
-                f"mimeType = 'application/vnd.google-apps.folder' and "
-                f"trashed = false"
-            )
-            res = service.files().list(
-                q=query,
-                corpora="drive",
-                driveId=shared_drive_id,
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-                fields="files(id, name)",
-                pageSize=10,
-            ).execute()
-            files = res.get("files", [])
-            if files:
-                return files[0]["id"]
+        res = service.files().list(
+            q=query,
+            corpora="allDrives",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            fields="files(id, name)",
+            pageSize=5,
+        ).execute()
 
-            metadata = {
-                "name": folder_name,
-                "mimeType": "application/vnd.google-apps.folder",
-                "parents": [shared_drive_id],  # raíz de la unidad
-            }
-            folder = service.files().create(
-                body=metadata,
-                supportsAllDrives=True,
-                fields="id"
-            ).execute()
-            return folder["id"]
+        existing_folders = res.get("files", [])
+        if existing_folders:
+            # ✅ Ya existe la carpeta del cliente/proveedor
+            return existing_folders[0]["id"]
 
-        raise ValueError("Debes proporcionar shared_drive_id o parent_folder_id.")
+        # 3️⃣ Crear la carpeta si no existe
+        metadata = {
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [base_folder_id],
+        }
+
+        folder = service.files().create(
+            body=metadata,
+            supportsAllDrives=True,
+            fields="id"
+        ).execute()
+
+        return folder["id"]
 
     except HttpError as e:
         raise RuntimeError(f"Error buscando/creando carpeta en Drive: {e}")
+
 
 def upload_to_drive(service, folder_id: str, file_path: str, file_name: str) -> str:
     try:

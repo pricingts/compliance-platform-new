@@ -48,6 +48,6 @@ elif page == "Registro de Proveedores/ Clientes":
     import views.upload_documents as up
     up.show()
 
-# elif page == "Progreso":
-#     import views.visualization as nt
-#     nt.show(current_user_email=user_email, is_admin=is_admin)
+elif page == "Progreso":
+    import views.progress as p
+    p.show()

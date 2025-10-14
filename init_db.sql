@@ -108,6 +108,13 @@ CREATE TABLE shipping_line_registration (
     shipper_bl VARCHAR(255)
 );
 
+CREATE TABLE internal_registration (
+    id SERIAL PRIMARY KEY,
+    request_id INT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    internal_label VARCHAR(255),
+    status_id INT REFERENCES status(id)
+);
+
 -- =========================================================
 -- 🔗 Relaciones y Consideraciones
 -- =========================================================
