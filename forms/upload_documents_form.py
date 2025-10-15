@@ -171,16 +171,19 @@ def forms():
         col1, col2 = st.columns(2)
         with col1:
             razon_key = f"razon_social_{request_id}"
-            if razon_key not in st.session_state:
-                st.session_state[razon_key] = ""
             razon_social = st.text_input(
                 "Razón Social",
-                value=st.session_state[razon_key],
+                value=st.session_state.get(razon_key, ""),
                 key=razon_key,
                 placeholder="Ingresa la razón social del cliente"
             )
         with col2:
-            fecha_creacion = st.date_input("Fecha de Creación", value=default_date, key=f"fecha_creacion_{request_id}")
+            fecha_key = f"fecha_creacion_{request_id}"
+            fecha_creacion = st.date_input(
+                "Fecha de Creación",
+                value=st.session_state.get(fecha_key, existing_fecha or datetime.now().date()),
+                key=fecha_key
+            )
 
         status_map = get_all_statuses(session)
         status_labels = list(status_map.keys())
@@ -449,15 +452,18 @@ def forms():
                                 continue
 
                             # 🔹 Guardar registro en BD
+                            razon_social_val = st.session_state.get(f"razon_social_{request_id}", "")
+                            fecha_creacion_val = st.session_state.get(f"fecha_creacion_{request_id}", datetime.now().date())
+
                             upsert_uploaded_document(
                                 session,
                                 request_id,
                                 doc_type_id,
                                 safe_name,
                                 drive_link,
-                                "system",
-                                razon_social,
-                                fecha_creacion
+                                st.user.name,
+                                razon_social_val,
+                                fecha_creacion_val
                             )
 
                             os.remove(tmp_path)

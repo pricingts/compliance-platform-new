@@ -68,10 +68,6 @@ def get_required_document_types(session: Session, profile_id: int):
 # ==========================
 
 def get_uploaded_documents_map(session: Session, request_id: int):
-    """
-    Devuelve {doc_type_id: [documentos]} con todos los documentos subidos para cada tipo.
-    Cada elemento es un diccionario con file_name, drive_link, uploaded_by, uploaded_at.
-    """
     rows = session.execute(
         text("""
             SELECT id, doc_type_id, file_name, drive_link, uploaded_at, uploaded_by
@@ -80,7 +76,7 @@ def get_uploaded_documents_map(session: Session, request_id: int):
             ORDER BY uploaded_at DESC
         """),
         {"rid": request_id}
-    ).mappings().all()  # 🔹 Esto es CRUCIAL: convierte cada fila en dict-like
+    ).mappings().all()
 
     grouped = {}
     for r in rows:
@@ -93,9 +89,6 @@ def upsert_uploaded_document(session: Session, request_id: int, document_type_id
                              file_name: str, drive_link: str, uploaded_by: str,
                             razon_social: Optional[str] = None,
                             fecha_creacion: Optional[datetime] = None):
-    """
-    Inserta un nuevo registro en la tabla registration con razon_social y fecha_creacion.
-    """
     session.execute(
         text("""
             INSERT INTO registration (request_id, doc_type_id, file_name, drive_link, uploaded_by, razon_social, fecha_creacion)
@@ -113,15 +106,7 @@ def upsert_uploaded_document(session: Session, request_id: int, document_type_id
     )
 
 
-
-# ==========================
-# 🔹 COMENTARIOS Y SEGUIMIENTO
-# ==========================
-
 def get_request_meta(session: Session, request_id: int):
-    """
-    Devuelve comentarios y notificaciones asociadas a la solicitud.
-    """
     row = session.execute(
         text("""
             SELECT notifications, comments
@@ -139,18 +124,12 @@ def get_request_meta(session: Session, request_id: int):
     }
 
 def update_request_meta(session: Session, request_id: int, notifications: str, comments: str):
-    """
-    Inserta o actualiza los comentarios/seguimiento de una solicitud
-    SIN requerir constraint UNIQUE.
-    """
-    # ¿Ya existe registro de comentarios para esta solicitud?
     existing = session.execute(
         text("SELECT id FROM comments WHERE request_id = :rid"),
         {"rid": request_id}
     ).fetchone()
 
     if existing:
-        # Actualiza el registro existente
         session.execute(
             text("""
                 UPDATE comments
@@ -161,7 +140,6 @@ def update_request_meta(session: Session, request_id: int, notifications: str, c
             {"rid": request_id, "notifications": notifications, "comments": comments}
         )
     else:
-        # Inserta uno nuevo
         session.execute(
             text("""
                 INSERT INTO comments (request_id, notifications, comments)
@@ -204,10 +182,6 @@ def update_status(session, table_name: str, record_id: int, status_id: int):
     )
 
 def upsert_status(session, table_name: str, request_id: int, entity_name: str, status_id: int, terminal_name: Optional[str] = None):
-    """
-    Inserta o actualiza el estado en la tabla correspondiente (customs, ports, lines o interno).
-    Normaliza valores NULL/vacíos para evitar duplicados.
-    """
     valid_tables = {
         "shipping_line_registration": ("line_name", None),
         "port_registration": ("port_name", "terminal_name"),
@@ -313,9 +287,7 @@ def get_request_creation_date(session, request_id: int):
     return row[0] if row else None
 
 def get_comments_by_request(session, request_id: int):
-    """
-    Devuelve los comentarios y notificaciones asociados a una solicitud.
-    """
+
     result = session.execute(
         text("""
             SELECT comments, notifications

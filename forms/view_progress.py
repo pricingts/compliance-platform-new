@@ -58,7 +58,6 @@ def show_progress_view():
             return
 
         status_map = {v: k for k, v in get_all_statuses(session).items()} 
-        data_rows = []
         for r in requests:
             request_id = r["id"]
             fecha = r.get("created_at")
@@ -72,12 +71,10 @@ def show_progress_view():
             with colB:
                 st.write(f"**Fecha de Creación:** {fecha_str}")
 
-            # === Registro interno
             internal_status_id = get_internal_status(session, request_id)
             internal_status = status_map.get(internal_status_id, "Sin estado")
             st.write(f"**Registro Interno:** {internal_status}")
 
-            # === Líneas navieras
             lines = get_shipping_lines_status(session, request_id)
             if lines:
                 with st.expander("🚢 Líneas Navieras", expanded=True):
@@ -86,7 +83,6 @@ def show_progress_view():
             else:
                 st.caption("Sin líneas navieras registradas.")
 
-            # === Puertos y terminales
             ports = get_ports_status(session, request_id)
             if ports:
                 with st.expander("⚓ Puertos y Terminales", expanded=True):
@@ -111,21 +107,6 @@ def show_progress_view():
             else:
                 st.caption("Sin aduanas registradas.")
 
-            # === Construir fila para tabla resumen
-            lines_text = ", ".join([f"{l.line_name}: {status_map.get(l.status_id, 'Sin estado')}" for l in lines]) if lines else ""
-            ports_text = ", ".join([f"{p.port_name}: {status_map.get(p.status_id, 'Sin estado')}" for p in ports]) if ports else ""
-            customs_text = ", ".join([f"{c.customs_name}: {status_map.get(c.status_id, 'Sin estado')}" for c in customs]) if customs else ""
-
-            data_rows.append({
-                "ID Solicitud": request_id,
-                "Razón Social": company_name,
-                "Fecha de Creación": fecha_str,
-                "Registro Interno": internal_status,
-                "Líneas Navieras": lines_text,
-                "Puertos": ports_text,
-                "Aduanas": customs_text
-            })
-
         comments_data = get_comments_by_request(session, request_id)
         st.markdown("#### 🗒️ Comentarios y Seguimiento")
         if comments_data:
@@ -135,8 +116,6 @@ def show_progress_view():
             st.write(f"{comments_data['notifications'] or '—'}")
         else:
             st.caption("Sin comentarios registrados para esta solicitud.")
-
-
 
     finally:
         session.close()
