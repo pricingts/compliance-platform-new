@@ -164,11 +164,23 @@ def forms():
         # ====================================
         # 🔹 DATOS BASE
         # ====================================
+
+        existing_fecha = get_request_creation_date(session, request_id)
+        default_date = existing_fecha or datetime.now().date()
+
         col1, col2 = st.columns(2)
         with col1:
-            razon_social = st.text_input("Razón Social", key=f"razon_social_{request_id}")
+            razon_key = f"razon_social_{request_id}"
+            if razon_key not in st.session_state:
+                st.session_state[razon_key] = ""
+            razon_social = st.text_input(
+                "Razón Social",
+                value=st.session_state[razon_key],
+                key=razon_key,
+                placeholder="Ingresa la razón social del cliente"
+            )
         with col2:
-            fecha_creacion = st.date_input("Fecha de Creación", key=f"fecha_creacion_{request_id}")
+            fecha_creacion = st.date_input("Fecha de Creación", value=default_date, key=f"fecha_creacion_{request_id}")
 
         status_map = get_all_statuses(session)
         status_labels = list(status_map.keys())
@@ -311,7 +323,7 @@ def forms():
                             name = f"{port} / {term.terminal_name or '(sin terminal)'}"
                             col1, col2 = st.columns([3, 2])
                             with col1:
-                                st.write(name)
+                                st.write(f"**{name}**")
                             with col2:
                                 st.selectbox(
                                     "Estado",
@@ -325,7 +337,7 @@ def forms():
                     for line in lines:
                         col1, col2 = st.columns([3, 2])
                         with col1:
-                            st.write(line.line_name)
+                            st.write(f"**{line.line_name}**")
                         with col2:
                             st.selectbox(
                                 "Estado",

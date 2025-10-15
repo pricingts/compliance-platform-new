@@ -11,7 +11,8 @@ from database.crud.documents import (
     get_shipping_lines_status,
     get_ports_status,
     get_customs_status,
-    get_all_statuses
+    get_all_statuses,
+    get_comments_by_request
 )
 
 # ==========================
@@ -56,12 +57,8 @@ def show_progress_view():
             st.warning("No hay solicitudes registradas para esta combinación.")
             return
 
-        status_map = {v: k for k, v in get_all_statuses(session).items()}  # id → nombre
+        status_map = {v: k for k, v in get_all_statuses(session).items()} 
         data_rows = []
-
-        # ===========================================
-        # 🔹 RECORRER SOLICITUDES
-        # ===========================================
         for r in requests:
             request_id = r["id"]
             fecha = r.get("created_at")
@@ -128,6 +125,17 @@ def show_progress_view():
                 "Puertos": ports_text,
                 "Aduanas": customs_text
             })
+
+        comments_data = get_comments_by_request(session, request_id)
+        st.markdown("#### 🗒️ Comentarios y Seguimiento")
+        if comments_data:
+            st.write(f"**Comentarios:**")
+            st.write(f"{comments_data['comments'] or '—'}")
+            st.write(f"**Seguimiento / Notificaciones:**")
+            st.write(f"{comments_data['notifications'] or '—'}")
+        else:
+            st.caption("Sin comentarios registrados para esta solicitud.")
+
 
 
     finally:

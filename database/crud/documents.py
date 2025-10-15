@@ -260,7 +260,6 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
                     params
                 )
 
-
         if existing:
             session.execute(
                 text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
@@ -299,10 +298,33 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
                 params
             )
 
-
 def get_internal_status(session, request_id):
     row = session.execute(
         text("SELECT status_id FROM internal_registration WHERE request_id = :rid"),
         {"rid": request_id}
     ).fetchone()
     return row[0] if row else None
+
+def get_request_creation_date(session, request_id: int):
+    row = session.execute(
+        text("SELECT fecha_creacion FROM registration WHERE request_id = :rid LIMIT 1"),
+        {"rid": request_id}
+    ).fetchone()
+    return row[0] if row else None
+
+def get_comments_by_request(session, request_id: int):
+    """
+    Devuelve los comentarios y notificaciones asociados a una solicitud.
+    """
+    result = session.execute(
+        text("""
+            SELECT comments, notifications
+            FROM comments
+            WHERE request_id = :request_id
+        """),
+        {"request_id": request_id}
+    ).fetchone()
+
+    if result:
+        return {"comments": result[0], "notifications": result[1]}
+    return None
