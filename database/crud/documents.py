@@ -201,11 +201,9 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
 
     if terminal_field:
         if terminal_field:
-            # ✅ Mantiene None si no hay terminal_name
             terminal_clean = terminal_name.strip() if terminal_name else None
             params["terminal_name"] = terminal_clean
 
-            # ✅ Busca coincidencias tratando NULL y '' como equivalentes
             existing = session.execute(
                 text(f"""
                     SELECT id FROM {table_name}
@@ -253,7 +251,7 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
             text(f"""
                 SELECT id FROM {table_name}
                 WHERE request_id = :request_id
-                  AND {name_field} = :name
+                AND {name_field} = :name
             """),
             params
         ).fetchone()
@@ -287,7 +285,6 @@ def get_request_creation_date(session, request_id: int):
     return row[0] if row else None
 
 def get_comments_by_request(session, request_id: int):
-
     result = session.execute(
         text("""
             SELECT comments, notifications
@@ -300,3 +297,50 @@ def get_comments_by_request(session, request_id: int):
     if result:
         return {"comments": result[0], "notifications": result[1]}
     return None
+
+def upsert_request_info(
+    session,
+    request_id: int,
+    uploaded_by: str,
+    razon_social: Optional[str] = None,
+    fecha_creacion: Optional[datetime] = None
+):
+    """
+    Asegura que la solicitud tenga registrada la razón social y la fecha de creación,
+    incluso si no se han subido documentos.
+
+    Si ya existe al menos un registro en 'registration' para la solicitud,
+    se actualizan esos campos. Si no existe ninguno, se inserta una fila mínima.
+    """
+    existing_row = session.execute(
+        text("SELECT id FROM registration WHERE request_id = :rid LIMIT 1"),
+        {"rid": request_id}
+    ).fetchone()
+
+    params = {
+        "rid": request_id,
+        "uploaded_by": uploaded_by,
+        "razon_social": razon_social,
+        "fecha_creacion": fecha_creacion
+    }
+
+    if existing_row:
+        session.execute(
+            text("""
+                UPDATE registration
+                SET razon_social = :razon_social,
+                    fecha_creacion = :fecha_creacion
+                WHERE request_id = :rid
+            """),
+            params
+        )
+    else:
+        session.execute(
+            text("""
+                INSERT INTO registration (
+                    request_id, file_name, uploaded_by, razon_social, fecha_creacion
+                )
+                VALUES (:rid, '-', :uploaded_by, :razon_social, :fecha_creacion)
+            """),
+            params
+        )

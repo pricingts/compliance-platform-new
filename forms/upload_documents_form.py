@@ -177,6 +177,7 @@ def forms():
                 key=razon_key,
                 placeholder="Ingresa la razón social del cliente"
             )
+
         with col2:
             fecha_key = f"fecha_creacion_{request_id}"
             fecha_creacion = st.date_input(
@@ -451,10 +452,6 @@ def forms():
                                 os.remove(tmp_path)
                                 continue
 
-                            # 🔹 Guardar registro en BD
-                            razon_social_val = st.session_state.get(f"razon_social_{request_id}", "")
-                            fecha_creacion_val = st.session_state.get(f"fecha_creacion_{request_id}", datetime.now().date())
-
                             upsert_uploaded_document(
                                 session,
                                 request_id,
@@ -462,12 +459,22 @@ def forms():
                                 safe_name,
                                 drive_link,
                                 st.user.name,
-                                razon_social_val,
-                                fecha_creacion_val
+                                razon_social,
+                                fecha_creacion
                             )
 
                             os.remove(tmp_path)
                             changes += 1
+                    
+                    razon_social_val = st.session_state.get(f"razon_social_{request_id}", "").strip()
+                    fecha_creacion_val = st.session_state.get(f"fecha_creacion_{request_id}", datetime.now().date())
+                    upsert_request_info(
+                        session,
+                        request_id,
+                        st.user.name,
+                        razon_social_val,
+                        fecha_creacion_val
+                    )
 
                     # === Guardar estatus de Registro Interno ===
                     upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label])
@@ -482,7 +489,7 @@ def forms():
                                     session,
                                     "shipping_line_registration",
                                     request_id,
-                                    line_data.line_name,   # ✅ usa el nombre real
+                                    line_data.line_name, 
                                     status_map[value]
                                 )
 
