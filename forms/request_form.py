@@ -157,7 +157,8 @@ def forms():
             has_port=puerto,
             has_shipping_line=linea_naviera,
             requested_by=requested_by,
-            requested_by_type=requested_by_type
+            requested_by_type=requested_by_type,
+            user_email= st.user.email
         )
 
         if aduana and tipo_aduana:

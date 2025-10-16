@@ -10,7 +10,7 @@ def identity_role(email: str | None) -> str:
     if not email:
         return "other"
 
-    usernames = {"compliance", "compliance1", "compliance2", "sjaafar"}
+    usernames = {"compliance", "compliance1", "compliance2", "sjaafar", "jsanchez"}
     domains = {"@tradingsolutions.com", "@tradingsol.com"}
 
     allowed_emails = {u + d for u in usernames for d in domains}

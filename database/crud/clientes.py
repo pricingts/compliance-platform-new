@@ -38,7 +38,8 @@ def insert_client_request(
     has_port: bool = False,
     has_shipping_line: bool = False,
     requested_by: str = None,
-    requested_by_type: str = None
+    requested_by_type: str = None,
+    user_email: str = None
 ):
 
     conn = get_connection()
@@ -59,9 +60,10 @@ def insert_client_request(
             customs_req,
             has_customs,
             has_port,
-            has_shipping_line
+            has_shipping_line,
+            user_email
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
     """, (
         profile_id,
@@ -77,7 +79,8 @@ def insert_client_request(
         customs_req,
         has_customs,
         has_port,
-        has_shipping_line
+        has_shipping_line,
+        user_email
     ))
 
     request_id = cur.fetchone()[0]
@@ -101,7 +104,6 @@ def insert_customs_registration(request_id: int, customs_list: list):
     conn.commit()
     cur.close()
     conn.close()
-
 
 def insert_port_registration(request_id: int, ports_dict: dict):
     """Guarda puertos y terminales asociadas a una solicitud.

@@ -348,7 +348,7 @@ def upsert_request_info(
 def get_razon_social_by_request(session, request_id: int):
     result = session.execute(
         text("""
-            SELECT razon_social
+            SELECT razon_social, fecha_creacion
             FROM registration
             WHERE request_id = :rid
             LIMIT 1
@@ -356,19 +356,26 @@ def get_razon_social_by_request(session, request_id: int):
         {"rid": request_id}
     ).fetchone()
 
-    return result[0] if result and result[0] else None
+    if result:
+        razon_social = result[0]
+        fecha_creacion = result[1]
+        return {
+            "razon_social": razon_social or None,
+            "fecha_creacion": fecha_creacion or None
+        }
+
+    return None
 
 def get_requests_for_progress(session, only_for_email: str | None = None):
-
     sql = text("""
         SELECT
             id,
             company_name,
             profile_id,
             created_at,
-            email
+            user_email
         FROM requests
-        WHERE (:email IS NULL OR LOWER(email) = LOWER(:email))
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
         ORDER BY created_at DESC
     """)
     rows = session.execute(sql, {"email": only_for_email}).fetchall()
@@ -378,7 +385,7 @@ def get_requests_for_progress(session, only_for_email: str | None = None):
             "company_name": r.company_name,
             "profile_id": r.profile_id,
             "created_at": r.created_at,
-            "email": r.email,
+            "user_email": r.user_email
         }
         for r in rows
     ]

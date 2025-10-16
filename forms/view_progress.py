@@ -34,19 +34,18 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
             st.info("No hay solicitudes para mostrar.")
             return
         
+
         companies = sorted({r.get("company_name") for r in requests if r.get("company_name")})
 
-        all_profile_names = get_profiles_list(session) or []  # p.ej. ["Cliente", "Proveedor", ...]
+        all_profile_names = get_profiles_list(session) or []  # Ejemplo: ["Cliente", "Proveedor"]
         name_to_id = {}
         for name in all_profile_names:
             pid = get_profile_id_by_name(session, name)
             if pid:
                 name_to_id[name] = pid
 
-        # Perfiles realmente presentes en las solicitudes filtradas (disponibles para selección)
         present_profile_ids = {r.get("profile_id") for r in requests if r.get("profile_id") is not None}
         available_profiles = [(name, pid) for name, pid in name_to_id.items() if pid in present_profile_ids]
-        # Orden alfabético por nombre
         available_profiles.sort(key=lambda x: x[0])
 
         col1, col2 = st.columns(2)
@@ -70,15 +69,19 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
         if not company_name or not profile_name:
             st.info("Selecciona una compañía y un perfil para ver el progreso.")
             return
-
+        
         profile_id = get_profile_id_by_name(session, profile_name)
-        requests = get_requests_by_company_and_profile(session, company_name, profile_id)
+        filtered_requests = [
+            r for r in requests
+            if r.get("company_name") == company_name and r.get("profile_id") == profile_id
+        ]
 
-        if not requests:
+        if not filtered_requests:
             st.warning("No hay solicitudes registradas para esta combinación.")
             return
 
-        status_map = {v: k for k, v in get_all_statuses(session).items()} 
+        status_map = {v: k for k, v in get_all_statuses(session).items()}
+
         for r in requests:
             request_id = r["id"]
             fecha = r.get("created_at")
@@ -86,12 +89,23 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
 
             st.markdown(f"---\n### Solicitud {company_name}")
 
+            registro = get_razon_social_by_request(session, request_id)
+
             colA, colB = st.columns(2)
-            with colA:
-                razon_social = get_razon_social_by_request(session, request_id)
-                st.write(f"**Razón Social:** {razon_social or '—'}")
-            with colB:
-                st.write(f"**Fecha de Creación:** {fecha_str}")
+            if registro:
+                with colA:
+                    st.write(f"**Razón Social:** {registro.get('razon_social') or '—'}")
+                with colB:
+                    fecha_creacion = registro.get("fecha_creacion")
+                    if fecha_creacion:
+                        st.write(f"**Fecha de Creación:** {fecha_creacion.strftime('%Y-%m-%d')}")
+                    else:
+                        st.write("**Fecha de Creación:** —")
+            else:
+                with colA:
+                    st.write("**Razón Social:** —")
+                with colB:
+                    st.write("**Fecha de Creación:** —")
 
             internal_status_id = get_internal_status(session, request_id)
             internal_status = status_map.get(internal_status_id, "Sin estado")
@@ -102,8 +116,6 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                 with st.expander("🚢 Líneas Navieras", expanded=True):
                     for l in lines:
                         st.write(f"- {l.line_name}: **{status_map.get(l.status_id, 'Sin estado')}**")
-            else:
-                st.caption("Sin líneas navieras registradas.")
 
             ports = get_ports_status(session, request_id)
             if ports:
@@ -117,8 +129,6 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                         for term in terminals:
                             terminal_label = f" ({term.terminal_name})" if term.terminal_name else ""
                             st.write(f" - Terminal{terminal_label}: **{status_map.get(term.status_id, 'Sin estado')}**")
-            else:
-                st.caption("Sin puertos registrados.")
 
             # === Aduanas
             customs = get_customs_status(session, request_id)
@@ -126,8 +136,6 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                 with st.expander("🧾 Aduanas", expanded=True):
                     for c in customs:
                         st.write(f"- {c.customs_name}: **{status_map.get(c.status_id, 'Sin estado')}**")
-            else:
-                st.caption("Sin aduanas registradas.")
 
         comments_data = get_comments_by_request(session, request_id)
         st.markdown("#### 🗒️ Comentarios y Seguimiento")
