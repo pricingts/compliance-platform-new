@@ -12,7 +12,8 @@ from database.crud.documents import (
     get_ports_status,
     get_customs_status,
     get_all_statuses,
-    get_comments_by_request
+    get_comments_by_request,
+    get_razon_social_by_request
 )
 
 # ==========================
@@ -67,7 +68,8 @@ def show_progress_view():
 
             colA, colB = st.columns(2)
             with colA:
-                st.write(f"**Razón Social:** {company_name}")
+                razon_social = get_razon_social_by_request(session, request_id)
+                st.write(f"**Razón Social:** {razon_social or '—'}")
             with colB:
                 st.write(f"**Fecha de Creación:** {fecha_str}")
 

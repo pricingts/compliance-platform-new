@@ -46,7 +46,8 @@ CREATE TABLE requests (
     customs_req TEXT,
     has_customs BOOLEAN DEFAULT FALSE,
     has_port BOOLEAN DEFAULT FALSE,
-    has_shipping_line BOOLEAN DEFAULT FALSE
+    has_shipping_line BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP
 );
 
 -- =====================
@@ -62,7 +63,8 @@ CREATE TABLE registration (
     drive_link TEXT,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     uploaded_by VARCHAR(150),
-    razon_social VARCHAR(255)
+    razon_social VARCHAR(255),
+    fecha_creacion date 
 );
 
 -- =====================
@@ -81,7 +83,8 @@ CREATE TABLE comments (
 CREATE TABLE customs_registration (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
-    customs_name VARCHAR(150) NOT NULL
+    customs_name VARCHAR(150) NOT NULL,
+    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
 );
 
 -- =====================
@@ -91,7 +94,8 @@ CREATE TABLE port_registration (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
     port_name VARCHAR(150) NOT NULL,
-    terminal_name VARCHAR(150)
+    terminal_name VARCHAR(150),
+    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
 );
 
 -- =====================
@@ -105,7 +109,8 @@ CREATE TABLE shipping_line_registration (
     pod VARCHAR(150),
     product VARCHAR(255),
     container_type VARCHAR(50),
-    shipper_bl VARCHAR(255)
+    shipper_bl VARCHAR(255),
+    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
 );
 
 CREATE TABLE internal_registration (
@@ -127,4 +132,4 @@ CREATE TABLE internal_registration (
 -- requests        1 ───< port_registration
 -- requests        1 ───< shipping_line_registration
 -- document_type   1 ───< registration
--- comments        1 ───< registration (opcional, id_comments)
+-- comments        1 ───< registration (opcional, id_comments)  

@@ -344,3 +344,16 @@ def upsert_request_info(
             """),
             params
         )
+
+def get_razon_social_by_request(session, request_id: int):
+    result = session.execute(
+        text("""
+            SELECT razon_social
+            FROM registration
+            WHERE request_id = :rid
+            LIMIT 1
+        """),
+        {"rid": request_id}
+    ).fetchone()
+
+    return result[0] if result and result[0] else None
