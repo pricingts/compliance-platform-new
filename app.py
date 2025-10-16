@@ -50,4 +50,4 @@ elif page == "Registro de Proveedores/ Clientes":
 
 elif page == "Progreso":
     import views.progress as p
-    p.show()
+    p.show(current_user_email=user_email, is_admin=is_admin)

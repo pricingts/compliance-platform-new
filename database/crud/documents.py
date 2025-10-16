@@ -357,3 +357,28 @@ def get_razon_social_by_request(session, request_id: int):
     ).fetchone()
 
     return result[0] if result and result[0] else None
+
+def get_requests_for_progress(session, only_for_email: str | None = None):
+
+    sql = text("""
+        SELECT
+            id,
+            company_name,
+            profile_id,
+            created_at,
+            email
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(email) = LOWER(:email))
+        ORDER BY created_at DESC
+    """)
+    rows = session.execute(sql, {"email": only_for_email}).fetchall()
+    return [
+        {
+            "id": r.id,
+            "company_name": r.company_name,
+            "profile_id": r.profile_id,
+            "created_at": r.created_at,
+            "email": r.email,
+        }
+        for r in rows
+    ]
