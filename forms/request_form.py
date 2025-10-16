@@ -65,7 +65,15 @@ def forms():
             ["Una vez por semana", "Dos veces por semana", "Tres veces por semana"],
             key="frecuencia_recordatorio"
         )
-    
+
+    aduana = False
+    tipo_aduana = []
+    puerto = False
+    terminales_seleccionados = {}
+    linea_naviera = False
+    tipo_linea = []
+    datos_msc = {}
+
     if tipo_solicitud.lower() == "cliente":
         col4, col5 = st.columns(2)
         with col4:
