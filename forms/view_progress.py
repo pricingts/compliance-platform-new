@@ -82,10 +82,8 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
 
         status_map = {v: k for k, v in get_all_statuses(session).items()}
 
-        for r in requests:
+        for r in filtered_requests:
             request_id = r["id"]
-            fecha = r.get("created_at")
-            fecha_str = fecha.strftime("%Y-%m-%d") if isinstance(fecha, datetime) else "Sin fecha"
 
             st.markdown(f"---\n### Solicitud {company_name}")
 
