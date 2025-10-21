@@ -9,7 +9,7 @@ from database.crud.clientes import (
 )
 from services.sheets_writer import save_request
 
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TERMINALES = {
     "Buenaventura": ["TCBUEN", "AGUA DULCE", "SPRBUN"],
     "Cartagena": ["COMPAS", "CONTECAR/SPRC"],
@@ -135,9 +135,9 @@ def forms():
         if not company_name:
             st.error("❌ Debes ingresar el nombre de la compañía.")
             return
-        if email and not EMAIL_RE.match(email):
-            st.error("❌ El correo electrónico no parece válido.")
-            return
+        # if email and not EMAIL_RE.match(email):
+        #     st.error("❌ El correo electrónico no parece válido.")
+        #     return
         if tipo_solicitud.lower() == "proveedor" and not requested_by:
             st.error("❌ Debes ingresar el nombre de quien solicita (proveedor).")
             return

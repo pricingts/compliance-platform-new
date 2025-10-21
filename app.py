@@ -3,8 +3,6 @@ from services.authentication import check_authentication
 
 st.set_page_config(page_title="Compliance Platform", layout="wide")
 
-
-# --- Roles ---
 def identity_role(email: str | None) -> str:
 
     if not email:
