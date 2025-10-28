@@ -80,7 +80,7 @@ def forms():
             tipo_operacion = st.selectbox("Tipo de Operacion", ["EXPO", "IMPO"], key ="tipo_operacion")
             aduana = st.checkbox("Registro con Aduana", key="aduana")
             if aduana:
-                tipo_aduana = st.multiselect("Escoja la(s) aduana(s)", ["CARGOFLASH", "SIAP", "MOVIADUANA"], key="tipo_aduana")
+                tipo_aduana = st.multiselect("Escoja la(s) aduana(s)", ["CARGOFLASH", "SIAP", "MOVIADUANA", "ITBF - USA", "GOMSA - MEX"], key="tipo_aduana")
 
             linea_naviera = st.checkbox("Registro con Linea Naviera", key="linea_naviera")
             if linea_naviera:
