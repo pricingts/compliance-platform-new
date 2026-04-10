@@ -29,7 +29,7 @@ class TestGetSession:
 
         with patch("utils.session_helpers.SessionLocal", return_value=mock_session):
             with pytest.raises(ValueError):
-                with get_session() as session:
+                with get_session() as _session:
                     raise ValueError("test error")
 
         mock_session.close.assert_called_once()

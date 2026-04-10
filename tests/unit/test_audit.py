@@ -1,5 +1,4 @@
 """Tests for audit trail — schema and service."""
-import pytest
 from sqlalchemy import text
 
 
