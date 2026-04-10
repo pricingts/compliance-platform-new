@@ -24,9 +24,13 @@ from database.crud.documents import (
 )
 from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
+from utils.error_handlers import handle_error
+from services.logging_config import get_logger
 
 # Google Drive utils
 from services.google_drive_utils import init_drive, find_or_create_folder, upload_to_drive
+
+logger = get_logger(__name__)
 
 # ==========================
 # FUNCIONES AUXILIARES
@@ -445,15 +449,19 @@ def _upload_files_to_drive(service, folder_id, uploaded_buffers, profile_id):
                 elif isinstance(key, int):
                     doc_type_id = key
                 else:
-                    st.warning(f"⚠️ Clave inesperada en uploaded_buffers: {key} (tipo {type(key).__name__})")
+                    st.warning(f"Clave inesperada en uploaded_buffers: {key} (tipo {type(key).__name__})")
                     continue
 
                 if not doc_type_id:
-                    st.warning(f"⚠️ No se encontró un ID válido de tipo de documento para {key}")
+                    st.warning(f"No se encontro un ID valido de tipo de documento para {key}")
                     continue
 
                 results.append((doc_type_id, safe_name, drive_link))
                 changes += 1
+            except Exception as e:
+                logger.exception(f"Drive upload failed for {safe_name}")
+                st.error(f"Error al subir {safe_name}: {e}")
+                # Continue with next file instead of aborting
             finally:
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -526,7 +534,12 @@ def _save_all_data(
     # === Guardar comentarios ===
     update_request_meta(session, request_id, notifications, comments)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to commit upload form data")
+        raise
 
 
 def forms():
@@ -571,38 +584,39 @@ def forms():
 
         # === Save everything ===
         if st.button("Guardar documentos y estados", key=f"btn_guardar_{request_id}"):
-            with st.spinner("Guardando cambios..."):
-                try:
-                    service = init_drive()
+            try:
+                service = init_drive()
 
-                    CLIENTS_FOLDER_ID = st.secrets["drive"].get("clients_folder_id")
-                    PROVIDERS_FOLDER_ID = st.secrets["drive"].get("providers_folder_id")
+                CLIENTS_FOLDER_ID = st.secrets["drive"].get("clients_folder_id")
+                PROVIDERS_FOLDER_ID = st.secrets["drive"].get("providers_folder_id")
 
-                    # Detectar tipo de entidad segun perfil
-                    entity_type = "proveedor" if "proveedor" in profile_name.lower() else "cliente"
+                # Detectar tipo de entidad segun perfil
+                entity_type = "proveedor" if "proveedor" in profile_name.lower() else "cliente"
 
-                    # Seleccionar carpeta base segun tipo
-                    base_folder_id = CLIENTS_FOLDER_ID if entity_type == "cliente" else PROVIDERS_FOLDER_ID
+                # Seleccionar carpeta base segun tipo
+                base_folder_id = CLIENTS_FOLDER_ID if entity_type == "cliente" else PROVIDERS_FOLDER_ID
 
-                    # Crear (o buscar) la subcarpeta especifica
-                    folder_id = find_or_create_folder(
-                        service,
-                        company_name,
-                        entity_type=entity_type,
-                        base_folder_id=base_folder_id
-                    )
+                # Crear (o buscar) la subcarpeta especifica
+                folder_id = find_or_create_folder(
+                    service,
+                    company_name,
+                    entity_type=entity_type,
+                    base_folder_id=base_folder_id
+                )
 
-                    # Upload files to Drive
+                # Upload files to Drive
+                with st.spinner("Subiendo documentos a Google Drive..."):
                     uploaded_results, changes = _upload_files_to_drive(
                         service, folder_id, uploaded_buffers, profile_id
                     )
 
-                    # Re-fetch status entities for save (needed for session_state iteration)
-                    lines = get_shipping_lines_status(session, request_id)
-                    ports = get_ports_status(session, request_id)
-                    customs = get_customs_status(session, request_id)
+                # Re-fetch status entities for save (needed for session_state iteration)
+                lines = get_shipping_lines_status(session, request_id)
+                ports = get_ports_status(session, request_id)
+                customs = get_customs_status(session, request_id)
 
-                    # Persist everything to DB
+                # Persist everything to DB
+                with st.spinner("Guardando datos..."):
                     _save_all_data(
                         session, request_id, uploaded_results,
                         razon_social, fecha_creacion,
@@ -612,11 +626,12 @@ def forms():
                         st.user.name
                     )
 
-                    st.success(f"✅ Cambios guardados correctamente. {changes} documento(s) nuevo(s) agregado(s).")
+                st.success(f"Cambios guardados correctamente. {changes} documento(s) nuevo(s) agregado(s).")
 
-                except Exception as e:
-                    session.rollback()
-                    st.error(f"❌ Error al guardar: {e}")
+            except Exception as e:
+                session.rollback()
+                logger.exception("Error saving upload form data")
+                handle_error(e, "Error al guardar los datos.")
 
     finally:
         session.close()
