@@ -8,70 +8,124 @@ from database.crud.clientes import (
     get_profile_id,
 )
 from services.sheets_writer import save_request
+from services.logging_config import get_logger
+from utils.error_handlers import handle_error
 from utils.validators import validate_email, sanitize_company_name
-TERMINALES = {
-    "Buenaventura": ["TCBUEN", "AGUA DULCE", "SPRBUN"],
-    "Cartagena": ["COMPAS", "CONTECAR/SPRC"],
+from config.constants import (
+    COMERCIALES,
+    TERMINALES,
+    TRADING_COUNTRIES,
+    REMINDER_FREQUENCIES,
+    OPERATION_TYPES,
+    CUSTOMS_SYSTEMS,
+    SHIPPING_LINES,
+    PORTS,
+    MSC_CONTAINER_TYPES,
+    LANGUAGES,
+    PROVIDER_TYPES,
+)
 
-}
+logger = get_logger(__name__)
 
-def forms():
 
+def _render_request_type_selector(session):
+    """Render request type selectbox and look up the corresponding profile_id.
+
+    Returns:
+        tuple: (tipo_solicitud, profile_id) or (None, None) on error.
+    """
     tipo_solicitud = st.selectbox(
         "Tipo de solicitud",
         ["cliente", "proveedor"],
-        key="tipo_solicitud"
+        key="tipo_solicitud",
     )
 
-    session = SessionLocal()
     try:
         profile_id = get_profile_id(session, tipo_solicitud)
-    except Exception:
+    except Exception as e:
         session.close()
-        st.error("Error al conectar con la base de datos.")
-        return
+        handle_error(e, "Error al conectar con la base de datos.")
+        return None, None
+
     if not profile_id:
         session.close()
         st.error("El perfil seleccionado no existe en la base de datos.")
-        return
+        return None, None
 
-    comerciales = [
-        "Pedro Luis Bruges", "Andrés Consuegra", "Ivan Zuluaga", "Sharon Zuñiga",
-        "Johnny Farah", "Felipe Hoyos", "Jorge Sánchez",
-        "Irina Paternina", "Stephanie Bruges"
-    ]
+    return tipo_solicitud, profile_id
 
-    # -------- Campos condicionales solicitante --------
+
+def _render_requester_section(tipo_solicitud):
+    """Render the requester input depending on request type.
+
+    Returns:
+        tuple: (requested_by, requested_by_type)
+    """
     requested_by = None
     requested_by_type = None
+
     if tipo_solicitud.lower() == "cliente":
-        requested_by = st.selectbox("Comercial", comerciales, key="comercial")
+        requested_by = st.selectbox("Comercial", COMERCIALES, key="comercial")
         requested_by_type = "comercial"
     elif tipo_solicitud.lower() == "proveedor":
-        requested_by = st.text_input("Nombre de quien solicita", key="solicitante_proveedor")
+        requested_by = st.text_input(
+            "Nombre de quien solicita", key="solicitante_proveedor"
+        )
         requested_by_type = "solicitante_proveedor"
 
-    # -------- Campos generales para cliente/proveedor --------
+    return requested_by, requested_by_type
+
+
+def _render_company_info():
+    """Render the 3-column layout with company fields.
+
+    Returns:
+        dict with keys: company_name, language, trading, email, location,
+              reminder_frequency.
+    """
     col1, col2, col3 = st.columns(3)
     with col1:
-        company_name = st.text_input("Nombre de la Compañía", key="nombre_compania")
-        language = st.selectbox("¿Qué idioma hablan?", ["Español", "Inglés"], key="idioma_compania")
+        company_name = st.text_input(
+            "Nombre de la Compañía", key="nombre_compania"
+        )
+        language = st.selectbox(
+            "¿Qué idioma hablan?", LANGUAGES, key="idioma_compania"
+        )
     with col2:
         trading = st.selectbox(
             "Desde qué trading se va a crear",
-            ["Colombia", "Mexico", "Panama", "Estados Unidos", "Chile", "Ecuador", "Peru", "Hong Kong"],
-            key="trading_creacion"
+            TRADING_COUNTRIES,
+            key="trading_creacion",
         )
         email = st.text_input("Correo electrónico", key="correo_compania")
-
     with col3:
-        location = st.text_input("Pais de la Compañía a Registrar", key="ubicacion_compania")
+        location = st.text_input(
+            "Pais de la Compañía a Registrar", key="ubicacion_compania"
+        )
         reminder_frequency = st.selectbox(
             "Frecuencia de recordatorio",
-            ["Una vez por semana", "Dos veces por semana", "Tres veces por semana"],
-            key="frecuencia_recordatorio"
+            REMINDER_FREQUENCIES,
+            key="frecuencia_recordatorio",
         )
 
+    return {
+        "company_name": company_name,
+        "language": language,
+        "trading": trading,
+        "email": email,
+        "location": location,
+        "reminder_frequency": reminder_frequency,
+    }
+
+
+def _render_client_specifics():
+    """Render client-specific fields: operation type, customs, ports, shipping lines.
+
+    Returns:
+        dict with keys: tipo_operacion, aduana, tipo_aduana, puerto,
+              terminales_seleccionados, linea_naviera, tipo_linea,
+              datos_msc, commodity.
+    """
     aduana = False
     tipo_aduana = []
     puerto = False
@@ -80,78 +134,134 @@ def forms():
     tipo_linea = []
     datos_msc = {}
 
-    if tipo_solicitud.lower() == "cliente":
-        col4, col5 = st.columns(2)
-        with col4:
-            tipo_operacion = st.selectbox("Tipo de Operacion", ["EXPO", "IMPO"], key ="tipo_operacion")
-            aduana = st.checkbox("Registro con Aduana", key="aduana")
-            if aduana:
-                tipo_aduana = st.multiselect("Escoja la(s) aduana(s)", ["CARGOFLASH", "SIAP", "MOVIADUANA", "ITBF - USA", "GOMSA - MEX"], key="tipo_aduana")
+    col4, col5 = st.columns(2)
+    with col4:
+        tipo_operacion = st.selectbox(
+            "Tipo de Operacion", OPERATION_TYPES, key="tipo_operacion"
+        )
+        aduana = st.checkbox("Registro con Aduana", key="aduana")
+        if aduana:
+            tipo_aduana = st.multiselect(
+                "Escoja la(s) aduana(s)", CUSTOMS_SYSTEMS, key="tipo_aduana"
+            )
 
-            linea_naviera = st.checkbox("Registro con Linea Naviera", key="linea_naviera")
-            if linea_naviera:
-                tipo_linea = st.multiselect("Escoja la(s) línea(s) naviera(s)", ["MSC", "ONE", "Otro"], key="tipo_linea")
-            
-                if "MSC" in tipo_linea:
+        linea_naviera = st.checkbox(
+            "Registro con Linea Naviera", key="linea_naviera"
+        )
+        if linea_naviera:
+            tipo_linea = st.multiselect(
+                "Escoja la(s) línea(s) naviera(s)",
+                SHIPPING_LINES,
+                key="tipo_linea",
+            )
 
-                    pol = st.text_input("POL (Puerto de Origen)", key="msc_pol")
-                    pod = st.text_input("POD (Puerto de Destino)", key="msc_pod")
-                    producto = st.text_input("Producto", key="msc_producto")
-                    tipo_contenedor = st.selectbox(
-                        "Tipo de Contenedor", 
-                        ["20' DRY", "40' DRY", "40' HC", "OTRO"], 
-                        key="msc_tipo_contenedor"
+            if "MSC" in tipo_linea:
+                pol = st.text_input(
+                    "POL (Puerto de Origen)", key="msc_pol"
+                )
+                pod = st.text_input(
+                    "POD (Puerto de Destino)", key="msc_pod"
+                )
+                producto = st.text_input("Producto", key="msc_producto")
+                tipo_contenedor = st.selectbox(
+                    "Tipo de Contenedor",
+                    MSC_CONTAINER_TYPES,
+                    key="msc_tipo_contenedor",
+                )
+                shipper_bl = st.text_input(
+                    "¿Cómo saldrá el Shipper en BL?", key="msc_shipper_bl"
+                )
+
+                datos_msc = {
+                    "POL": pol,
+                    "POD": pod,
+                    "Producto": producto,
+                    "Tipo de Contenedor": tipo_contenedor,
+                    "Shipper en BL": shipper_bl,
+                }
+            else:
+                datos_msc = {}
+
+    with col5:
+        commodity = st.text_input("Commodity", key="commodity")
+        puerto = st.checkbox("Registro con Puerto", key="Puerto")
+        if puerto:
+            tipo_puerto = st.multiselect(
+                "Escoja el/los puerto(s)",
+                PORTS,
+                key="tipo_puerto",
+            )
+            terminales_seleccionados = {}
+            for p in tipo_puerto:
+                if p in TERMINALES:
+                    terminales = st.multiselect(
+                        f"Seleccione terminal(es) para {p}",
+                        TERMINALES[p],
+                        key=f"terminal_{p}",
                     )
-                    shipper_bl = st.text_input("¿Cómo saldrá el Shipper en BL?", key="msc_shipper_bl")
-
-                    # Guardamos todo en un diccionario para luego insertarlo en DB o PDF
-                    datos_msc = {
-                        "POL": pol,
-                        "POD": pod,
-                        "Producto": producto,
-                        "Tipo de Contenedor": tipo_contenedor,
-                        "Shipper en BL": shipper_bl,
-                    }
+                    terminales_seleccionados[p] = terminales
                 else:
-                    datos_msc = {}
+                    terminales_seleccionados[p] = []
 
-        with col5:
-            commodity = st.text_input("Commodity", key="commodity")
-            puerto = st.checkbox("Registro con Puerto", key="Puerto")
-            if puerto:
-                tipo_puerto = st.multiselect("Escoja el/los puerto(s)", ["Cartagena", "Barranquilla", "Santa Marta", "Buenaventura"], key="tipo_puerto")
-                terminales_seleccionados = {}
-                for p in tipo_puerto:
-                    if p in TERMINALES:
-                        terminales = st.multiselect(
-                            f"Seleccione terminal(es) para {p}", 
-                            TERMINALES[p], 
-                            key=f"terminal_{p}"
-                        )
-                        terminales_seleccionados[p] = terminales
-                    else:
-                        terminales_seleccionados[p] = []
-    else:
-        st.selectbox("Tipo de Proveedor", ["Logístico", "No Logístico"], key="tipo_proveedor")
+    return {
+        "tipo_operacion": tipo_operacion,
+        "aduana": aduana,
+        "tipo_aduana": tipo_aduana,
+        "puerto": puerto,
+        "terminales_seleccionados": terminales_seleccionados,
+        "linea_naviera": linea_naviera,
+        "tipo_linea": tipo_linea,
+        "datos_msc": datos_msc,
+        "commodity": commodity,
+    }
 
 
-    # -------- Botón de guardado (sin st.form) --------
-    if st.button("Guardar", key="guardar_general"):
-        # Sanitize inputs
-        company_name = sanitize_company_name(company_name)
+def _validate_form(company_name, email, tipo_solicitud, requested_by):
+    """Validate form inputs. Shows st.error on failure.
 
-        # Validaciones mínimas
-        if not company_name:
-            st.error("❌ Debes ingresar el nombre de la compañía.")
-            return
-        if email and not validate_email(email):
-            st.error("❌ El correo electrónico no parece válido.")
-            return
-        if tipo_solicitud.lower() == "proveedor" and not requested_by:
-            st.error("❌ Debes ingresar el nombre de quien solicita (proveedor).")
-            return
+    Returns:
+        True if validation passed, False otherwise.
+    """
+    if not company_name:
+        st.error("Debes ingresar el nombre de la compañía.")
+        return False
+    if email and not validate_email(email):
+        st.error("El correo electrónico no parece válido.")
+        return False
+    if tipo_solicitud.lower() == "proveedor" and not requested_by:
+        st.error("Debes ingresar el nombre de quien solicita (proveedor).")
+        return False
+    return True
 
-        # Persistir en DB
+
+def _save_request_to_db(
+    session,
+    profile_id,
+    company_name,
+    email,
+    trading,
+    location,
+    language,
+    reminder_frequency,
+    tipo_solicitud,
+    tipo_operacion,
+    commodity,
+    aduana,
+    puerto,
+    linea_naviera,
+    requested_by,
+    requested_by_type,
+    tipo_aduana,
+    terminales_seleccionados,
+    tipo_linea,
+    datos_msc,
+):
+    """Persist the request and associated registrations to the database.
+
+    Returns:
+        request_id on success, None on failure.
+    """
+    with st.spinner("Guardando solicitud..."):
         try:
             request_id = insert_client_request(
                 session,
@@ -162,8 +272,16 @@ def forms():
                 location=location or None,
                 language=language,
                 reminder_frequency=reminder_frequency,
-                operation_type=tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
-                commodity=commodity if tipo_solicitud.lower() == "cliente" else None,
+                operation_type=(
+                    tipo_operacion
+                    if tipo_solicitud.lower() == "cliente"
+                    else None
+                ),
+                commodity=(
+                    commodity
+                    if tipo_solicitud.lower() == "cliente"
+                    else None
+                ),
                 has_customs=aduana,
                 has_port=puerto,
                 has_shipping_line=linea_naviera,
@@ -176,7 +294,9 @@ def forms():
                 insert_customs_registration(session, request_id, tipo_aduana)
 
             if puerto and terminales_seleccionados:
-                insert_port_registration(session, request_id, terminales_seleccionados)
+                insert_port_registration(
+                    session, request_id, terminales_seleccionados
+                )
 
             if linea_naviera and tipo_linea:
                 line_data = {}
@@ -185,61 +305,210 @@ def forms():
                         line_data[line] = datos_msc
                     else:
                         line_data[line] = {}
-                insert_shipping_line_registration(session, request_id, line_data)
+                insert_shipping_line_registration(
+                    session, request_id, line_data
+                )
+
+            return request_id
         except Exception as e:
             session.rollback()
             session.close()
-            st.error(f"Error al guardar la solicitud: {e}")
+            logger.error(
+                "Failed to save request to database",
+                extra={"error": str(e)},
+            )
+            handle_error(e, f"Error al guardar la solicitud: {e}")
+            return None
+
+
+def _save_to_sheets(
+    request_id,
+    tipo_solicitud,
+    company_name,
+    email,
+    trading,
+    location,
+    language,
+    reminder_frequency,
+    requested_by,
+    requested_by_type,
+    tipo_operacion,
+    commodity,
+    aduana,
+    tipo_aduana,
+    puerto,
+    terminales_seleccionados,
+    linea_naviera,
+    tipo_linea,
+    datos_msc,
+):
+    """Sync the request to Google Sheets. Errors are logged but not fatal."""
+    try:
+        save_request(
+            {
+                "request_id": request_id,
+                "tipo_solicitud": tipo_solicitud,
+                "company_name": company_name,
+                "email": email,
+                "trading": trading,
+                "location": location,
+                "language": language,
+                "reminder_frequency": reminder_frequency,
+                "requested_by": requested_by,
+                "requested_by_type": requested_by_type,
+                "tipo_operacion": (
+                    tipo_operacion
+                    if tipo_solicitud.lower() == "cliente"
+                    else None
+                ),
+                "commodity": (
+                    commodity
+                    if tipo_solicitud.lower() == "cliente"
+                    else None
+                ),
+                "aduana": (
+                    f"Sí: {', '.join(tipo_aduana)}"
+                    if aduana and tipo_aduana
+                    else "Sí"
+                    if aduana
+                    else "No"
+                ),
+                "puerto": (
+                    "Sí: "
+                    + "; ".join(
+                        [
+                            f"{p}: {', '.join(t)}"
+                            for p, t in terminales_seleccionados.items()
+                        ]
+                    )
+                    if puerto and terminales_seleccionados
+                    else "Sí"
+                    if puerto
+                    else "No"
+                ),
+                "linea_naviera": (
+                    "Sí: "
+                    + ", ".join(
+                        [
+                            f"{linea}"
+                            + (
+                                f" (POL: {datos_msc.get('POL')}, "
+                                f"POD: {datos_msc.get('POD')}, "
+                                f"Producto: {datos_msc.get('Producto')}, "
+                                f"Contenedor: {datos_msc.get('Tipo de Contenedor')}, "
+                                f"Shipper BL: {datos_msc.get('Shipper en BL')})"
+                                if linea == "MSC" and datos_msc
+                                else ""
+                            )
+                            for linea in tipo_linea
+                        ]
+                    )
+                    if linea_naviera and tipo_linea
+                    else "Sí"
+                    if linea_naviera
+                    else "No"
+                ),
+            }
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to save request to Google Sheets",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+
+
+def forms():
+    """Main request form entry point.
+
+    Renders the complete request creation form and handles submission.
+    """
+    session = SessionLocal()
+    try:
+        tipo_solicitud, profile_id = _render_request_type_selector(session)
+        if tipo_solicitud is None:
             return
 
+        requested_by, requested_by_type = _render_requester_section(
+            tipo_solicitud
+        )
+        company_info = _render_company_info()
 
-        save_request({
-            "request_id": request_id,
-            "tipo_solicitud": tipo_solicitud,
-            "company_name": company_name,
-            "email": email,
-            "trading": trading,
-            "location": location,
-            "language": language,
-            "reminder_frequency": reminder_frequency,
-            "requested_by": requested_by,
-            "requested_by_type": requested_by_type,
-
-            "tipo_operacion": tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
-            "commodity": commodity if tipo_solicitud.lower() == "cliente" else None,
-
-            "aduana": (
-                f"Sí: {', '.join(tipo_aduana)}"
-                if aduana and tipo_aduana
-                else "Sí" if aduana
-                else "No"
-            ),
-
-            "puerto": (
-                "Sí: " + "; ".join(
-                    [f"{p}: {', '.join(t)}" for p, t in terminales_seleccionados.items()]
-                )
-                if puerto and terminales_seleccionados
-                else "Sí" if puerto
-                else "No"
-            ),
-
-            "linea_naviera": (
-                "Sí: " + ", ".join([
-                    f"{linea}" + (
-                        f" (POL: {datos_msc.get('POL')}, POD: {datos_msc.get('POD')}, "
-                        f"Producto: {datos_msc.get('Producto')}, "
-                        f"Contenedor: {datos_msc.get('Tipo de Contenedor')}, "
-                        f"Shipper BL: {datos_msc.get('Shipper en BL')})"
-                        if linea == "MSC" and datos_msc else ""
-                    )
-                    for linea in tipo_linea
-                ])
-                if linea_naviera and tipo_linea
-                else "Sí" if linea_naviera
-                else "No"
+        # Client-specific fields
+        client_data = {}
+        if tipo_solicitud.lower() == "cliente":
+            client_data = _render_client_specifics()
+        else:
+            st.selectbox(
+                "Tipo de Proveedor", PROVIDER_TYPES, key="tipo_proveedor"
             )
-        })
 
-        session.close()
-        st.success("Solicitud guardada correctamente")
+        # -------- Save button (no st.form) --------
+        if st.button("Guardar", key="guardar_general"):
+            company_name = sanitize_company_name(company_info["company_name"])
+
+            if not _validate_form(
+                company_name,
+                company_info["email"],
+                tipo_solicitud,
+                requested_by,
+            ):
+                return
+
+            request_id = _save_request_to_db(
+                session=session,
+                profile_id=profile_id,
+                company_name=company_name,
+                email=company_info["email"],
+                trading=company_info["trading"],
+                location=company_info["location"],
+                language=company_info["language"],
+                reminder_frequency=company_info["reminder_frequency"],
+                tipo_solicitud=tipo_solicitud,
+                tipo_operacion=client_data.get("tipo_operacion"),
+                commodity=client_data.get("commodity"),
+                aduana=client_data.get("aduana", False),
+                puerto=client_data.get("puerto", False),
+                linea_naviera=client_data.get("linea_naviera", False),
+                requested_by=requested_by,
+                requested_by_type=requested_by_type,
+                tipo_aduana=client_data.get("tipo_aduana", []),
+                terminales_seleccionados=client_data.get(
+                    "terminales_seleccionados", {}
+                ),
+                tipo_linea=client_data.get("tipo_linea", []),
+                datos_msc=client_data.get("datos_msc", {}),
+            )
+            if request_id is None:
+                return
+
+            _save_to_sheets(
+                request_id=request_id,
+                tipo_solicitud=tipo_solicitud,
+                company_name=company_name,
+                email=company_info["email"],
+                trading=company_info["trading"],
+                location=company_info["location"],
+                language=company_info["language"],
+                reminder_frequency=company_info["reminder_frequency"],
+                requested_by=requested_by,
+                requested_by_type=requested_by_type,
+                tipo_operacion=client_data.get("tipo_operacion"),
+                commodity=client_data.get("commodity"),
+                aduana=client_data.get("aduana", False),
+                tipo_aduana=client_data.get("tipo_aduana", []),
+                puerto=client_data.get("puerto", False),
+                terminales_seleccionados=client_data.get(
+                    "terminales_seleccionados", {}
+                ),
+                linea_naviera=client_data.get("linea_naviera", False),
+                tipo_linea=client_data.get("tipo_linea", []),
+                datos_msc=client_data.get("datos_msc", {}),
+            )
+
+            session.close()
+            st.success("Solicitud guardada correctamente")
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass

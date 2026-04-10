@@ -7,12 +7,12 @@ Single source of truth for UI options and business data.
 # Commercial contacts
 COMERCIALES = [
     "Pedro Luis Bruges",
-    "Andres Consuegra",
+    "Andrés Consuegra",
     "Ivan Zuluaga",
-    "Sharon Zuniga",
+    "Sharon Zuñiga",
     "Johnny Farah",
     "Felipe Hoyos",
-    "Jorge Sanchez",
+    "Jorge Sánchez",
     "Irina Paternina",
     "Stephanie Bruges",
 ]
@@ -56,6 +56,18 @@ CUSTOMS_SYSTEMS = [
 
 # Shipping line names
 SHIPPING_LINES = ["MSC", "ONE", "Otro"]
+
+# Port names for multiselect
+PORTS = ["Cartagena", "Barranquilla", "Santa Marta", "Buenaventura"]
+
+# MSC container types
+MSC_CONTAINER_TYPES = ["20' DRY", "40' DRY", "40' HC", "OTRO"]
+
+# Language options
+LANGUAGES = ["Español", "Inglés"]
+
+# Provider types
+PROVIDER_TYPES = ["Logístico", "No Logístico"]
 
 # Internal document type labels (for upload form)
 INTERNAL_DOC_LABELS = ["empresa", "vinculacion", "seguridad"]
