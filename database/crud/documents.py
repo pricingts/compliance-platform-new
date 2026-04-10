@@ -256,6 +256,30 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
                 params
             )
 
+def batch_upsert_statuses(
+    session: Session,
+    updates: list[dict],
+) -> None:
+    """Batch upsert status updates in a single transaction.
+
+    Each item in `updates` must have:
+        - table_name: str (e.g., "shipping_line_registration")
+        - request_id: int
+        - entity_name: str
+        - status_id: int
+        - terminal_name: str | None (only for port_registration)
+    """
+    for item in updates:
+        upsert_status(
+            session=session,
+            table_name=item["table_name"],
+            request_id=item["request_id"],
+            entity_name=item["entity_name"],
+            status_id=item["status_id"],
+            terminal_name=item.get("terminal_name"),
+        )
+
+
 def get_internal_status(session: Session, request_id: int) -> Optional[int]:
     row = session.execute(
         text("SELECT status_id FROM internal_registration WHERE request_id = :rid"),
