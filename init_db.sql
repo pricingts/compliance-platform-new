@@ -121,6 +121,21 @@ CREATE TABLE internal_registration (
     status_id INT REFERENCES status(id)
 );
 
+-- =====================
+-- 11. Tabla audit_log
+-- =====================
+CREATE TABLE audit_log (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_email VARCHAR(255) NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    entity_type VARCHAR(100) NOT NULL,
+    entity_id INTEGER,
+    old_value TEXT,
+    new_value TEXT,
+    details TEXT
+);
+
 -- =========================================================
 -- 🔗 Relaciones y Consideraciones
 -- =========================================================
