@@ -229,3 +229,58 @@ class TestUpsertStatus:
                 "whatever",
                 1,
             )
+
+
+class TestBatchUpsertStatuses:
+    def test_batch_upsert_multiple_tables(self, db_session, seed_statuses):
+        from database.crud.documents import batch_upsert_statuses
+
+        # Create a profile and request first
+        db_session.execute(
+            text("INSERT INTO profiles (name) VALUES ('cliente')")
+        )
+        db_session.commit()
+        db_session.execute(
+            text("INSERT INTO requests (profile_id, company_name) VALUES (1, 'Batch Test')")
+        )
+        db_session.commit()
+        request_id = db_session.execute(
+            text("SELECT id FROM requests WHERE company_name = 'Batch Test'")
+        ).scalar()
+
+        pending_id = seed_statuses["pendiente"]
+
+        updates = [
+            {"table_name": "shipping_line_registration", "request_id": request_id,
+             "entity_name": "MSC", "status_id": pending_id},
+            {"table_name": "customs_registration", "request_id": request_id,
+             "entity_name": "CARGOFLASH", "status_id": pending_id},
+            {"table_name": "port_registration", "request_id": request_id,
+             "entity_name": "Cartagena", "status_id": pending_id, "terminal_name": "COMPAS"},
+        ]
+
+        batch_upsert_statuses(db_session, updates)
+        db_session.commit()
+
+        ship = db_session.execute(
+            text("SELECT COUNT(*) FROM shipping_line_registration WHERE request_id = :rid"),
+            {"rid": request_id}
+        ).scalar()
+        assert ship == 1
+
+        cust = db_session.execute(
+            text("SELECT COUNT(*) FROM customs_registration WHERE request_id = :rid"),
+            {"rid": request_id}
+        ).scalar()
+        assert cust == 1
+
+        port = db_session.execute(
+            text("SELECT COUNT(*) FROM port_registration WHERE request_id = :rid"),
+            {"rid": request_id}
+        ).scalar()
+        assert port == 1
+
+    def test_batch_upsert_empty_list(self, db_session):
+        """Empty updates list should be a no-op."""
+        from database.crud.documents import batch_upsert_statuses
+        batch_upsert_statuses(db_session, [])  # Should not raise

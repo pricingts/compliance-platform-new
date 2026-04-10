@@ -95,3 +95,37 @@ class TestSanitizeCompanyName:
 
     def test_normal_name_unchanged(self):
         assert sanitize_company_name("Trading Solutions") == "Trading Solutions"
+
+
+class TestFileValidation:
+    """Tests for file size validation functions."""
+
+    def test_validate_file_size_under_limit(self):
+        from unittest.mock import MagicMock
+
+        from utils.validators import validate_file_size
+
+        mock_file = MagicMock()
+        mock_file.size = 5 * 1024 * 1024  # 5 MB
+        assert validate_file_size(mock_file) is True
+
+    def test_validate_file_size_over_limit(self):
+        from unittest.mock import MagicMock
+
+        from utils.validators import validate_file_size
+
+        mock_file = MagicMock()
+        mock_file.size = 15 * 1024 * 1024  # 15 MB
+        assert validate_file_size(mock_file) is False
+
+    def test_validate_file_size_none(self):
+        from utils.validators import validate_file_size
+
+        assert validate_file_size(None) is True
+
+    def test_file_size_error_message_contains_limit(self):
+        from utils.validators import file_size_error_message
+
+        msg = file_size_error_message()
+        assert "10" in msg
+        assert "MB" in msg

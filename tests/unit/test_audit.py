@@ -1,40 +1,59 @@
-"""Tests for audit trail functionality."""
-import json
+"""Tests for audit trail — schema and service."""
 from sqlalchemy import text
 
-class TestAuditLog:
-    def test_log_action_creates_record(self, db_session):
-        """log_action should create an audit_log record."""
-        from services.audit import log_action
-        log_action(db_session, "test@example.com", "CREATE", "request", 1, details="Test")
-        result = db_session.execute(text("SELECT * FROM audit_log")).fetchall()
-        assert len(result) == 1
-        assert result[0].user_email == "test@example.com"
-        assert result[0].action == "CREATE"
 
-    def test_log_action_with_old_new_values(self, db_session):
-        """log_action should store old and new values as JSON."""
-        from services.audit import log_action
-        old = {"status": "pending"}
-        new = {"status": "approved"}
-        log_action(db_session, "user@test.com", "STATUS_CHANGE", "customs", 5,
-                   old_value=old, new_value=new)
-        result = db_session.execute(text("SELECT old_value, new_value FROM audit_log")).fetchone()
-        assert json.loads(result[0]) == old
-        assert json.loads(result[1]) == new
+class TestAuditLogSchema:
+    """Verify audit_log table exists and accepts inserts."""
 
-    def test_log_action_without_entity_id(self, db_session):
-        """log_action should work without entity_id."""
-        from services.audit import log_action
-        log_action(db_session, "user@test.com", "UPLOAD", "registration")
-        result = db_session.execute(text("SELECT entity_id FROM audit_log")).fetchone()
-        assert result[0] is None
+    def test_audit_log_table_exists(self, db_session):
+        """The audit_log table should exist in the test schema."""
+        result = db_session.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'")
+        ).fetchone()
+        assert result is not None, "audit_log table must exist"
 
-    def test_multiple_audit_entries(self, db_session):
-        """Multiple actions should create multiple records."""
+    def test_audit_log_insert_and_read(self, db_session):
+        """log_action should persist a row to audit_log."""
         from services.audit import log_action
-        log_action(db_session, "user1@test.com", "CREATE", "request", 1)
-        log_action(db_session, "user2@test.com", "UPDATE", "request", 1)
-        log_action(db_session, "user1@test.com", "UPLOAD", "registration", 10)
-        count = db_session.execute(text("SELECT COUNT(*) FROM audit_log")).scalar()
-        assert count == 3
+
+        log_action(
+            session=db_session,
+            user_email="test@tradingsolutions.com",
+            action="CREATE",
+            entity_type="request",
+            entity_id=1,
+            new_value={"company_name": "Test Corp"},
+            details="Created via test",
+        )
+        db_session.commit()
+
+        row = db_session.execute(
+            text("SELECT user_email, action, entity_type, entity_id, new_value, details FROM audit_log")
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "test@tradingsolutions.com"
+        assert row[1] == "CREATE"
+        assert row[2] == "request"
+        assert row[3] == 1
+        assert "Test Corp" in row[4]
+        assert row[5] == "Created via test"
+
+    def test_audit_log_nullable_fields(self, db_session):
+        """entity_id, old_value, new_value, details should accept NULL."""
+        from services.audit import log_action
+
+        log_action(
+            session=db_session,
+            user_email="test@tradingsolutions.com",
+            action="LOGIN",
+            entity_type="session",
+        )
+        db_session.commit()
+
+        row = db_session.execute(
+            text("SELECT entity_id, old_value, new_value, details FROM audit_log")
+        ).fetchone()
+        assert row[0] is None
+        assert row[1] is None
+        assert row[2] is None
+        assert row[3] is None

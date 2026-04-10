@@ -10,6 +10,7 @@ Bug 2: The comments section (get_comments_by_request) must be INSIDE the
 import ast
 
 import pytest
+from sqlalchemy import text
 
 
 class TestProgressView:
@@ -83,3 +84,32 @@ class TestProgressView:
             f"must be indented deeper than the for loop (indent={for_indent}, "
             f"line {for_line_idx + 1}). It appears to be OUTSIDE the loop."
         )
+
+
+class TestProgressPagination:
+    """Integration tests for paginated get_requests_for_progress."""
+
+    def test_get_requests_for_progress_pagination(self, db_session, seed_profiles):
+        from database.crud.documents import get_requests_for_progress
+
+        for i in range(5):
+            db_session.execute(
+                text(
+                    "INSERT INTO requests (profile_id, company_name, user_email)"
+                    " VALUES (:pid, :name, :email)"
+                ),
+                {
+                    "pid": seed_profiles["cliente"],
+                    "name": f"Co {i}",
+                    "email": "test@test.com",
+                },
+            )
+        db_session.commit()
+
+        results, total = get_requests_for_progress(db_session, page=0, page_size=2)
+        assert total == 5
+        assert len(results) == 2
+
+        results, total = get_requests_for_progress(db_session, page=2, page_size=2)
+        assert total == 5
+        assert len(results) == 1

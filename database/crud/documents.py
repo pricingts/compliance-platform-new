@@ -256,6 +256,30 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
                 params
             )
 
+def batch_upsert_statuses(
+    session: Session,
+    updates: list[dict],
+) -> None:
+    """Batch upsert status updates in a single transaction.
+
+    Each item in `updates` must have:
+        - table_name: str (e.g., "shipping_line_registration")
+        - request_id: int
+        - entity_name: str
+        - status_id: int
+        - terminal_name: str | None (only for port_registration)
+    """
+    for item in updates:
+        upsert_status(
+            session=session,
+            table_name=item["table_name"],
+            request_id=item["request_id"],
+            entity_name=item["entity_name"],
+            status_id=item["status_id"],
+            terminal_name=item.get("terminal_name"),
+        )
+
+
 def get_internal_status(session: Session, request_id: int) -> Optional[int]:
     row = session.execute(
         text("SELECT status_id FROM internal_registration WHERE request_id = :rid"),
@@ -352,26 +376,41 @@ def get_razon_social_by_request(session: Session, request_id: int) -> Optional[d
 
     return None
 
-def get_requests_for_progress(session: Session, only_for_email: str | None = None) -> list[dict]:
+def get_requests_for_progress(
+    session: Session,
+    only_for_email: str | None = None,
+    page: int = 0,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
+    """Return paginated requests and total count."""
+    count_sql = text("""
+        SELECT COUNT(*)
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+    """)
+    total = session.execute(count_sql, {"email": only_for_email}).scalar()
+
     sql = text("""
-        SELECT
-            id,
-            company_name,
-            profile_id,
-            created_at,
-            user_email
+        SELECT id, company_name, profile_id, created_at, user_email
         FROM requests
         WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
         ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
     """)
-    rows = session.execute(sql, {"email": only_for_email}).fetchall()
-    return [
+    rows = session.execute(sql, {
+        "email": only_for_email,
+        "limit": page_size,
+        "offset": page * page_size,
+    }).fetchall()
+
+    results = [
         {
             "id": r.id,
             "company_name": r.company_name,
             "profile_id": r.profile_id,
             "created_at": r.created_at,
-            "user_email": r.user_email
+            "user_email": r.user_email,
         }
         for r in rows
     ]
+    return results, total
