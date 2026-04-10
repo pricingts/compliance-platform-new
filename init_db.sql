@@ -136,6 +136,18 @@ CREATE TABLE audit_log (
     details TEXT
 );
 
+-- =====================
+-- INDEXES
+-- =====================
+CREATE INDEX IF NOT EXISTS idx_requests_user_email ON requests(user_email);
+CREATE INDEX IF NOT EXISTS idx_requests_company_name ON requests(company_name);
+CREATE INDEX IF NOT EXISTS idx_requests_profile_id ON requests(profile_id);
+CREATE INDEX IF NOT EXISTS idx_registration_request_id ON registration(request_id);
+CREATE INDEX IF NOT EXISTS idx_customs_registration_request_id ON customs_registration(request_id);
+CREATE INDEX IF NOT EXISTS idx_port_registration_request_id ON port_registration(request_id);
+CREATE INDEX IF NOT EXISTS idx_shipping_line_registration_request_id ON shipping_line_registration(request_id);
+CREATE INDEX IF NOT EXISTS idx_internal_registration_request_id ON internal_registration(request_id);
+
 -- =========================================================
 -- 🔗 Relaciones y Consideraciones
 -- =========================================================
