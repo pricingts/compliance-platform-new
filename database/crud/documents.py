@@ -376,26 +376,41 @@ def get_razon_social_by_request(session: Session, request_id: int) -> Optional[d
 
     return None
 
-def get_requests_for_progress(session: Session, only_for_email: str | None = None) -> list[dict]:
+def get_requests_for_progress(
+    session: Session,
+    only_for_email: str | None = None,
+    page: int = 0,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
+    """Return paginated requests and total count."""
+    count_sql = text("""
+        SELECT COUNT(*)
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+    """)
+    total = session.execute(count_sql, {"email": only_for_email}).scalar()
+
     sql = text("""
-        SELECT
-            id,
-            company_name,
-            profile_id,
-            created_at,
-            user_email
+        SELECT id, company_name, profile_id, created_at, user_email
         FROM requests
         WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
         ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
     """)
-    rows = session.execute(sql, {"email": only_for_email}).fetchall()
-    return [
+    rows = session.execute(sql, {
+        "email": only_for_email,
+        "limit": page_size,
+        "offset": page * page_size,
+    }).fetchall()
+
+    results = [
         {
             "id": r.id,
             "company_name": r.company_name,
             "profile_id": r.profile_id,
             "created_at": r.created_at,
-            "user_email": r.user_email
+            "user_email": r.user_email,
         }
         for r in rows
     ]
+    return results, total

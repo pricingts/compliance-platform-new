@@ -1,17 +1,16 @@
 import streamlit as st
 from database.db import SessionLocal
 from database.crud.documents import (
-    get_profiles_list,
-    get_profile_id_by_name,
     get_internal_status,
     get_shipping_lines_status,
     get_ports_status,
     get_customs_status,
-    get_all_statuses,
     get_comments_by_request,
     get_razon_social_by_request,
-    get_requests_for_progress
+    get_requests_for_progress,
 )
+from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
+from config.constants import DEFAULT_PAGE_SIZE
 
 # ==========================
 #   VISTA DE PROGRESO
@@ -24,18 +23,27 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
 
     try:
         email_filter = None if is_admin else (current_user_email or None)
-        requests = get_requests_for_progress(session, only_for_email=email_filter)
+
+        page_key = "progress_page"
+        if page_key not in st.session_state:
+            st.session_state[page_key] = 0
+
+        requests, total_count = get_requests_for_progress(
+            session,
+            only_for_email=email_filter,
+            page=st.session_state[page_key],
+            page_size=DEFAULT_PAGE_SIZE,
+        )
         if not requests:
             st.info("No hay solicitudes para mostrar.")
             return
-        
 
         companies = sorted({r.get("company_name") for r in requests if r.get("company_name")})
 
-        all_profile_names = get_profiles_list(session) or []  # Ejemplo: ["Cliente", "Proveedor"]
+        all_profile_names = cached_profiles_list() or []
         name_to_id = {}
         for name in all_profile_names:
-            pid = get_profile_id_by_name(session, name)
+            pid = cached_profile_id(name)
             if pid:
                 name_to_id[name] = pid
 
@@ -65,7 +73,7 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
             st.info("Selecciona una compañía y un perfil para ver el progreso.")
             return
         
-        profile_id = get_profile_id_by_name(session, profile_name)
+        profile_id = cached_profile_id(profile_name)
         filtered_requests = [
             r for r in requests
             if r.get("company_name") == company_name and r.get("profile_id") == profile_id
@@ -75,7 +83,7 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
             st.warning("No hay solicitudes registradas para esta combinación.")
             return
 
-        status_map = {v: k for k, v in get_all_statuses(session).items()}
+        status_map = status_id_to_name_map()
 
         for r in filtered_requests:
             request_id = r["id"]
@@ -139,6 +147,20 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                 st.write(f"{comments_data['notifications'] or '—'}")
             else:
                 st.caption("Sin comentarios registrados para esta solicitud.")
+
+        # --- Pagination controls ---
+        total_pages = max(1, (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE)
+        col_prev, col_info, col_next = st.columns([1, 2, 1])
+        with col_prev:
+            if st.button("< Anterior", disabled=st.session_state[page_key] == 0):
+                st.session_state[page_key] -= 1
+                st.rerun()
+        with col_info:
+            st.caption(f"Pagina {st.session_state[page_key] + 1} de {total_pages} ({total_count} solicitudes)")
+        with col_next:
+            if st.button("Siguiente >", disabled=st.session_state[page_key] >= total_pages - 1):
+                st.session_state[page_key] += 1
+                st.rerun()
 
     finally:
         session.close()

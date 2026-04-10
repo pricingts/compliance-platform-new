@@ -7,9 +7,6 @@ import streamlit as st
 from datetime import datetime
 from database.db import SessionLocal
 from database.crud.documents import (
-    get_all_company_names,
-    get_profiles_list,
-    get_profile_id_by_name,
     get_requests_by_company_and_profile,
     get_required_document_types,
     get_uploaded_documents_map,
@@ -25,6 +22,7 @@ from database.crud.documents import (
     upsert_request_info,
     update_request_meta,
 )
+from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
 
 # Google Drive utils
@@ -124,8 +122,8 @@ def _render_company_profile_selector(session):
 
     Returns (company_name, profile_name, profile_id) or None if not selected.
     """
-    companies = get_all_company_names(session)
-    profiles = get_profiles_list(session)
+    companies = cached_company_names()
+    profiles = cached_profiles_list()
 
     col1, col2 = st.columns(2)
     with col1:
@@ -147,7 +145,7 @@ def _render_company_profile_selector(session):
         st.info("Selecciona una compañía y un perfil para continuar.")
         return None
 
-    profile_id = get_profile_id_by_name(session, profile_name)
+    profile_id = cached_profile_id(profile_name)
     if not profile_id:
         st.error("❌ El perfil seleccionado no existe.")
         return None
