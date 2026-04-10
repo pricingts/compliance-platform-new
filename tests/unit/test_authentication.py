@@ -1,5 +1,4 @@
 """Tests for authentication service."""
-import pytest
 
 class TestAuthentication:
     def test_session_timeout_constant_exists(self):

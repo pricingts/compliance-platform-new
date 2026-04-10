@@ -8,7 +8,6 @@ Bug 2: The comments section (get_comments_by_request) must be INSIDE the
 """
 
 import ast
-import textwrap
 
 import pytest
 

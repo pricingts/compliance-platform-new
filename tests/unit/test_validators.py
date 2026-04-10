@@ -1,5 +1,4 @@
 """Tests for input validation."""
-import pytest
 from utils.validators import validate_email, sanitize_text, sanitize_company_name
 
 

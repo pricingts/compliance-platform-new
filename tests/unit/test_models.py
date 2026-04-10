@@ -7,7 +7,7 @@ and relationships.
 """
 
 import pytest
-from datetime import datetime, date
+from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 

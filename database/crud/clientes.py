@@ -33,7 +33,7 @@ def insert_client_request(
     user_email: str = None,
 ) -> int:
     """Insert a new client/provider request and return the new row id."""
-    result = session.execute(
+    session.execute(
         text("""
             INSERT INTO requests (
                 profile_id, commercial, company_name, trading, country,

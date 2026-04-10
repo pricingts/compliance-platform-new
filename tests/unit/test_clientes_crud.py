@@ -5,7 +5,6 @@ customs registrations, port registrations, and shipping line registrations.
 All functions accept a SQLAlchemy session as their first parameter.
 """
 
-import pytest
 from sqlalchemy import text
 
 

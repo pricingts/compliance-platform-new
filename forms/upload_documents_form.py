@@ -172,7 +172,6 @@ def forms():
         # ====================================
 
         existing_fecha = get_request_creation_date(session, request_id)
-        default_date = existing_fecha or datetime.now().date()
 
         col1, col2 = st.columns(2)
         with col1:
@@ -390,8 +389,6 @@ def forms():
                 import tempfile
                 try:
                     service = init_drive()
-                    shared_drive_id = st.secrets["drive"].get("shared_drive_id")
-                    parent_folder_id = st.secrets["drive"].get("parent_folder_id")
 
                     CLIENTS_FOLDER_ID = st.secrets["drive"].get("clients_folder_id")
                     PROVIDERS_FOLDER_ID = st.secrets["drive"].get("providers_folder_id")
@@ -491,7 +488,7 @@ def forms():
                     for key, value in st.session_state.items():
                         if key.startswith("status_line_"):
                             record_id = int(key.replace("status_line_", ""))
-                            line_data = next((l for l in lines if l.id == record_id), None)
+                            line_data = next((ln for ln in lines if ln.id == record_id), None)
                             if line_data:
                                 upsert_status(
                                     session,

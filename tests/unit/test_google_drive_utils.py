@@ -1,6 +1,5 @@
 """Tests for Google Drive utilities - security focused."""
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 
 class TestUploadToDrive:

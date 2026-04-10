@@ -1,5 +1,4 @@
 """Tests for timezone utilities."""
-import pytest
 from datetime import datetime, timezone
 from utils.timezone import get_colombia_tz, now_colombia, to_colombia_tz
 

@@ -1,5 +1,4 @@
 """Tests for audit trail functionality."""
-import pytest
 import json
 from sqlalchemy import text
 

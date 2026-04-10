@@ -132,7 +132,7 @@ def forms():
                     else:
                         terminales_seleccionados[p] = []
     else:
-        tipo_proveedor = st.selectbox("Tipo de Proveedor", ["Logístico", "No Logístico"], key="tipo_proveedor")
+        st.selectbox("Tipo de Proveedor", ["Logístico", "No Logístico"], key="tipo_proveedor")
 
 
     # -------- Botón de guardado (sin st.form) --------
@@ -242,4 +242,4 @@ def forms():
         })
 
         session.close()
-        st.success(f"Solicitud guardada correctamente")
+        st.success("Solicitud guardada correctamente")

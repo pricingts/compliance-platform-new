@@ -7,7 +7,6 @@ same two-line body that app.py uses, and verify it against get_admin_emails().
 This ensures the security fix (config-driven admin list) is correctly tested.
 """
 import os
-import pytest
 from typing import Optional
 from unittest.mock import patch
 from config.settings import get_admin_emails

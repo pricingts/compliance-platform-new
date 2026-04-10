@@ -8,8 +8,7 @@ be in place first.
 """
 
 import types
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, text

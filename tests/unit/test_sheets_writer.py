@@ -6,10 +6,8 @@ Bug 3: Module-level Google auth executes at import time, crashing the import
 """
 
 import sys
-import types
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 class TestSheetsWriterImport:
