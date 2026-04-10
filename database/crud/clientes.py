@@ -32,57 +32,75 @@ def insert_client_request(
     requested_by_type: str = None,
     user_email: str = None,
 ) -> int:
-    """Insert a new client/provider request and return the new row id."""
-    session.execute(
-        text("""
-            INSERT INTO requests (
-                profile_id, commercial, company_name, trading, country,
-                language, email, reminder_frequency, operation_type,
-                commodity, customs_req, has_customs, has_port,
-                has_shipping_line, user_email
-            )
-            VALUES (
-                :profile_id, :commercial, :company_name, :trading, :country,
-                :language, :email, :reminder_frequency, :operation_type,
-                :commodity, :customs_req, :has_customs, :has_port,
-                :has_shipping_line, :user_email
-            )
-        """),
-        {
-            "profile_id": profile_id,
-            "commercial": requested_by,
-            "company_name": company_name,
-            "trading": trading,
-            "country": location,
-            "language": language,
-            "email": email,
-            "reminder_frequency": reminder_frequency,
-            "operation_type": operation_type,
-            "commodity": commodity,
-            "customs_req": customs_req,
-            "has_customs": has_customs,
-            "has_port": has_port,
-            "has_shipping_line": has_shipping_line,
-            "user_email": user_email,
-        },
-    )
-    session.commit()
+    """Insert a new client/provider request and return the new row id.
 
-    # Retrieve the last inserted row id (works for both PostgreSQL and SQLite)
-    request_id = session.execute(
-        text("SELECT id FROM requests WHERE rowid = last_insert_rowid()")
-    ).scalar()
+    Uses INSERT ... RETURNING on PostgreSQL for race-condition-safe ID
+    retrieval. Falls back to last_insert_rowid() on SQLite (test env).
+    """
+    params = {
+        "profile_id": profile_id,
+        "commercial": requested_by,
+        "company_name": company_name,
+        "trading": trading,
+        "country": location,
+        "language": language,
+        "email": email,
+        "reminder_frequency": reminder_frequency,
+        "operation_type": operation_type,
+        "commodity": commodity,
+        "customs_req": customs_req,
+        "has_customs": has_customs,
+        "has_port": has_port,
+        "has_shipping_line": has_shipping_line,
+        "user_email": user_email,
+    }
 
-    # Fallback for PostgreSQL (which doesn't have last_insert_rowid)
-    if request_id is None:
+    dialect = session.bind.dialect.name if session.bind else "unknown"
+
+    if dialect == "postgresql":
+        result = session.execute(
+            text("""
+                INSERT INTO requests (
+                    profile_id, commercial, company_name, trading, country,
+                    language, email, reminder_frequency, operation_type,
+                    commodity, customs_req, has_customs, has_port,
+                    has_shipping_line, user_email
+                )
+                VALUES (
+                    :profile_id, :commercial, :company_name, :trading, :country,
+                    :language, :email, :reminder_frequency, :operation_type,
+                    :commodity, :customs_req, :has_customs, :has_port,
+                    :has_shipping_line, :user_email
+                )
+                RETURNING id
+            """),
+            params,
+        )
+        request_id = result.scalar()
+    else:
+        # SQLite path (used in tests)
+        session.execute(
+            text("""
+                INSERT INTO requests (
+                    profile_id, commercial, company_name, trading, country,
+                    language, email, reminder_frequency, operation_type,
+                    commodity, customs_req, has_customs, has_port,
+                    has_shipping_line, user_email
+                )
+                VALUES (
+                    :profile_id, :commercial, :company_name, :trading, :country,
+                    :language, :email, :reminder_frequency, :operation_type,
+                    :commodity, :customs_req, :has_customs, :has_port,
+                    :has_shipping_line, :user_email
+                )
+            """),
+            params,
+        )
         request_id = session.execute(
-            text(
-                "SELECT id FROM requests WHERE profile_id = :pid "
-                "ORDER BY id DESC LIMIT 1"
-            ),
-            {"pid": profile_id},
+            text("SELECT id FROM requests WHERE rowid = last_insert_rowid()")
         ).scalar()
 
+    session.commit()
     return request_id
 
 

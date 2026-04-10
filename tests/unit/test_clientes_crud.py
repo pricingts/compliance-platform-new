@@ -84,6 +84,49 @@ class TestInsertClientRequest:
         assert row[0] is not None, "created_at should be auto-populated by DEFAULT"
 
 
+class TestInsertClientRequestIdReliability:
+    """Tests for reliable ID retrieval after insert."""
+
+    def test_insert_returns_correct_id_for_multiple_inserts(self, db_session, seed_profiles):
+        """Multiple sequential inserts should each return a unique, correct ID."""
+        from database.crud.clientes import insert_client_request
+
+        ids = []
+        for i in range(5):
+            rid = insert_client_request(
+                db_session,
+                profile_id=seed_profiles["cliente"],
+                company_name=f"Company {i}",
+                user_email=f"user{i}@test.com",
+            )
+            ids.append(rid)
+
+        # All IDs should be unique
+        assert len(set(ids)) == 5, f"Expected 5 unique IDs, got {ids}"
+
+        # Each ID should match its company
+        for i, rid in enumerate(ids):
+            row = db_session.execute(
+                text("SELECT company_name FROM requests WHERE id = :id"),
+                {"id": rid},
+            ).fetchone()
+            assert row is not None, f"No row found for id={rid}"
+            assert row[0] == f"Company {i}", f"ID {rid} has wrong company: {row[0]}"
+
+    def test_insert_returns_positive_integer(self, db_session, seed_profiles):
+        """Return value must be a positive integer."""
+        from database.crud.clientes import insert_client_request
+
+        rid = insert_client_request(
+            db_session,
+            profile_id=seed_profiles["cliente"],
+            company_name="Positive ID Test",
+            user_email="test@test.com",
+        )
+        assert isinstance(rid, int)
+        assert rid > 0
+
+
 class TestInsertCustomsRegistration:
     """Tests for insert_customs_registration()."""
 
