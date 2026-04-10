@@ -1,4 +1,4 @@
-streamlit==1.44.1
+streamlit==1.56.0
 sqlalchemy==2.0.40
 psycopg2-binary==2.9.11
 Authlib==1.6.0
