@@ -1,17 +1,17 @@
+from typing import Optional
+
 import streamlit as st
 from services.authentication import check_authentication
+from config.settings import get_admin_emails
 
 st.set_page_config(page_title="Compliance Platform", layout="wide")
 
-def identity_role(email: str | None) -> str:
+def identity_role(email: Optional[str]) -> str:
 
     if not email:
         return "other"
 
-    usernames = {"compliance", "compliance1", "compliance2", "sjaafar", "jsanchez", "pricing5"}
-    domains = {"@tradingsolutions.com", "@tradingsol.com"}
-
-    allowed_emails = {u + d for u in usernames for d in domains}
+    allowed_emails = get_admin_emails()
     return "compliance" if email.lower() in allowed_emails else "other"
 
 

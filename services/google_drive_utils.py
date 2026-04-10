@@ -14,7 +14,6 @@ def init_drive():
     service = build("drive", "v3", credentials=credentials)
     return service
 
-from googleapiclient.errors import HttpError
 
 def find_or_create_folder(
     service,
@@ -90,15 +89,8 @@ def upload_to_drive(service, folder_id: str, file_path: str, file_name: str) -> 
 
         file_id = file["id"]
 
-        # Dar permiso de lectura por enlace
-        try:
-            service.permissions().create(
-                fileId=file_id,
-                supportsAllDrives=True,
-                body={"type": "anyone", "role": "reader"},
-            ).execute()
-        except HttpError:
-            pass
+        # Documents inherit permissions from the shared drive folder.
+        # No public "anyone" permission is created (security fix).
 
         return file.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"
 

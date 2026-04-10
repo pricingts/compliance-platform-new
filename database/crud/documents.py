@@ -1,4 +1,5 @@
 # database/crud/documents.py
+from __future__ import annotations
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -9,19 +10,19 @@ from typing import Optional
 # 🔹 EMPRESAS Y PERFILES
 # ==========================
 
-def get_all_company_names(session: Session):
+def get_all_company_names(session: Session) -> list[str]:
     rows = session.execute(
         text("SELECT DISTINCT company_name FROM requests ORDER BY company_name ASC")
     ).fetchall()
     return [r[0] for r in rows if r[0]]
 
-def get_profiles_list(session: Session):
+def get_profiles_list(session: Session) -> list[str]:
     rows = session.execute(
         text("SELECT name FROM profiles ORDER BY name ASC")
     ).fetchall()
     return [r[0] for r in rows if r[0]]
 
-def get_profile_id_by_name(session: Session, profile_name: str):
+def get_profile_id_by_name(session: Session, profile_name: str) -> Optional[int]:
     return session.execute(
         text("SELECT id FROM profiles WHERE name = :n"),
         {"n": profile_name}
@@ -31,7 +32,7 @@ def get_profile_id_by_name(session: Session, profile_name: str):
 # 🔹 SOLICITUDES EXISTENTES
 # ==========================
 
-def get_requests_by_company_and_profile(session: Session, company_name: str, profile_id: int, limit: int = 20):
+def get_requests_by_company_and_profile(session: Session, company_name: str, profile_id: int, limit: int = 20) -> list[dict]:
     rows = session.execute(
         text("""
             SELECT id, COALESCE(created_at, CURRENT_TIMESTAMP) AS created_at
@@ -48,7 +49,7 @@ def get_requests_by_company_and_profile(session: Session, company_name: str, pro
 # 🔹 TIPOS DE DOCUMENTOS
 # ==========================
 
-def get_required_document_types(session: Session, profile_id: int):
+def get_required_document_types(session: Session, profile_id: int) -> list[dict]:
     """
     Devuelve los tipos de documentos (category) requeridos para un perfil.
     """
@@ -67,7 +68,7 @@ def get_required_document_types(session: Session, profile_id: int):
 # 🔹 DOCUMENTOS SUBIDOS
 # ==========================
 
-def get_uploaded_documents_map(session: Session, request_id: int):
+def get_uploaded_documents_map(session: Session, request_id: int) -> dict[int, list[dict]]:
     rows = session.execute(
         text("""
             SELECT id, doc_type_id, file_name, drive_link, uploaded_at, uploaded_by
@@ -88,7 +89,7 @@ def get_uploaded_documents_map(session: Session, request_id: int):
 def upsert_uploaded_document(session: Session, request_id: int, document_type_id: int,
                              file_name: str, drive_link: str, uploaded_by: str,
                             razon_social: Optional[str] = None,
-                            fecha_creacion: Optional[datetime] = None):
+                            fecha_creacion: Optional[datetime] = None) -> None:
     session.execute(
         text("""
             INSERT INTO registration (request_id, doc_type_id, file_name, drive_link, uploaded_by, razon_social, fecha_creacion)
@@ -106,7 +107,7 @@ def upsert_uploaded_document(session: Session, request_id: int, document_type_id
     )
 
 
-def get_request_meta(session: Session, request_id: int):
+def get_request_meta(session: Session, request_id: int) -> dict:
     row = session.execute(
         text("""
             SELECT notifications, comments
@@ -123,7 +124,7 @@ def get_request_meta(session: Session, request_id: int):
         "general_comments": row[1],
     }
 
-def update_request_meta(session: Session, request_id: int, notifications: str, comments: str):
+def update_request_meta(session: Session, request_id: int, notifications: str, comments: str) -> None:
     existing = session.execute(
         text("SELECT id FROM comments WHERE request_id = :rid"),
         {"rid": request_id}
@@ -148,26 +149,26 @@ def update_request_meta(session: Session, request_id: int, notifications: str, c
             {"rid": request_id, "notifications": notifications, "comments": comments}
         )
 
-def get_all_statuses(session):
+def get_all_statuses(session: Session) -> dict[str, int]:
     rows = session.execute(text("SELECT id, status FROM status ORDER BY id")).fetchall()
     return {r[1]: r[0] for r in rows}
 
 
-def get_shipping_lines_status(session, request_id):
+def get_shipping_lines_status(session: Session, request_id: int) -> list:
     return session.execute(text("""
         SELECT id, line_name, status_id
         FROM shipping_line_registration
         WHERE request_id = :req
     """), {"req": request_id}).fetchall()
 
-def get_ports_status(session, request_id):
+def get_ports_status(session: Session, request_id: int) -> list:
     return session.execute(text("""
         SELECT id, port_name, terminal_name, status_id
         FROM port_registration
         WHERE request_id = :req
     """), {"req": request_id}).fetchall()
 
-def get_customs_status(session, request_id):
+def get_customs_status(session: Session, request_id: int) -> list:
     return session.execute(text("""
         SELECT id, customs_name, status_id
         FROM customs_registration
@@ -175,13 +176,13 @@ def get_customs_status(session, request_id):
     """), {"req": request_id}).fetchall()
 
 
-def update_status(session, table_name: str, record_id: int, status_id: int):
+def update_status(session: Session, table_name: str, record_id: int, status_id: int) -> None:
     session.execute(
         text(f"UPDATE {table_name} SET status_id = :st WHERE id = :rid"),
         {"st": status_id, "rid": record_id}
     )
 
-def upsert_status(session, table_name: str, request_id: int, entity_name: str, status_id: int, terminal_name: Optional[str] = None):
+def upsert_status(session: Session, table_name: str, request_id: int, entity_name: str, status_id: int, terminal_name: Optional[str] = None) -> None:
     valid_tables = {
         "shipping_line_registration": ("line_name", None),
         "port_registration": ("port_name", "terminal_name"),
@@ -200,37 +201,22 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
     }
 
     if terminal_field:
-        if terminal_field:
-            terminal_clean = terminal_name.strip() if terminal_name else None
-            params["terminal_name"] = terminal_clean
+        terminal_clean = terminal_name.strip() if terminal_name else None
+        params["terminal_name"] = terminal_clean
 
-            existing = session.execute(
-                text(f"""
-                    SELECT id FROM {table_name}
-                    WHERE request_id = :request_id
-                    AND {name_field} = :name
-                    AND (
-                            ({terminal_field} IS NULL AND :terminal_name IS NULL)
-                        OR {terminal_field} = :terminal_name
-                        OR (COALESCE({terminal_field}, '') = COALESCE(:terminal_name, ''))
-                    )
-                """),
-                params
-            ).fetchone()
-
-            if existing:
-                session.execute(
-                    text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
-                    {"status_id": status_id, "id": existing[0]},
+        existing = session.execute(
+            text(f"""
+                SELECT id FROM {table_name}
+                WHERE request_id = :request_id
+                AND {name_field} = :name
+                AND (
+                        ({terminal_field} IS NULL AND :terminal_name IS NULL)
+                    OR {terminal_field} = :terminal_name
+                    OR (COALESCE({terminal_field}, '') = COALESCE(:terminal_name, ''))
                 )
-            else:
-                session.execute(
-                    text(f"""
-                        INSERT INTO {table_name} (request_id, {name_field}, {terminal_field}, status_id)
-                        VALUES (:request_id, :name, :terminal_name, :status_id)
-                    """),
-                    params
-                )
+            """),
+            params
+        ).fetchone()
 
         if existing:
             session.execute(
@@ -270,21 +256,21 @@ def upsert_status(session, table_name: str, request_id: int, entity_name: str, s
                 params
             )
 
-def get_internal_status(session, request_id):
+def get_internal_status(session: Session, request_id: int) -> Optional[int]:
     row = session.execute(
         text("SELECT status_id FROM internal_registration WHERE request_id = :rid"),
         {"rid": request_id}
     ).fetchone()
     return row[0] if row else None
 
-def get_request_creation_date(session, request_id: int):
+def get_request_creation_date(session: Session, request_id: int) -> Optional[datetime]:
     row = session.execute(
         text("SELECT fecha_creacion FROM registration WHERE request_id = :rid LIMIT 1"),
         {"rid": request_id}
     ).fetchone()
     return row[0] if row else None
 
-def get_comments_by_request(session, request_id: int):
+def get_comments_by_request(session: Session, request_id: int) -> Optional[dict]:
     result = session.execute(
         text("""
             SELECT comments, notifications
@@ -299,12 +285,12 @@ def get_comments_by_request(session, request_id: int):
     return None
 
 def upsert_request_info(
-    session,
+    session: Session,
     request_id: int,
     uploaded_by: str,
     razon_social: Optional[str] = None,
     fecha_creacion: Optional[datetime] = None
-):
+) -> None:
     """
     Asegura que la solicitud tenga registrada la razón social y la fecha de creación,
     incluso si no se han subido documentos.
@@ -345,7 +331,7 @@ def upsert_request_info(
             params
         )
 
-def get_razon_social_by_request(session, request_id: int):
+def get_razon_social_by_request(session: Session, request_id: int) -> Optional[dict]:
     result = session.execute(
         text("""
             SELECT razon_social, fecha_creacion
@@ -366,7 +352,7 @@ def get_razon_social_by_request(session, request_id: int):
 
     return None
 
-def get_requests_for_progress(session, only_for_email: str | None = None):
+def get_requests_for_progress(session: Session, only_for_email: str | None = None) -> list[dict]:
     sql = text("""
         SELECT
             id,

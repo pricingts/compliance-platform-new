@@ -1,15 +1,14 @@
 import streamlit as st
-import re
+from database.db import SessionLocal
 from database.crud.clientes import (
     insert_client_request,
     insert_customs_registration,
     insert_port_registration,
     insert_shipping_line_registration,
-    get_profile_id
+    get_profile_id,
 )
 from services.sheets_writer import save_request
-
-# EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+from utils.validators import validate_email, sanitize_company_name
 TERMINALES = {
     "Buenaventura": ["TCBUEN", "AGUA DULCE", "SPRBUN"],
     "Cartagena": ["COMPAS", "CONTECAR/SPRC"],
@@ -24,9 +23,16 @@ def forms():
         key="tipo_solicitud"
     )
 
-    profile_id = get_profile_id(tipo_solicitud)
+    session = SessionLocal()
+    try:
+        profile_id = get_profile_id(session, tipo_solicitud)
+    except Exception:
+        session.close()
+        st.error("Error al conectar con la base de datos.")
+        return
     if not profile_id:
-        st.error("❌ El perfil seleccionado no existe en la base de datos.")
+        session.close()
+        st.error("El perfil seleccionado no existe en la base de datos.")
         return
 
     comerciales = [
@@ -131,50 +137,60 @@ def forms():
 
     # -------- Botón de guardado (sin st.form) --------
     if st.button("Guardar", key="guardar_general"):
+        # Sanitize inputs
+        company_name = sanitize_company_name(company_name)
+
         # Validaciones mínimas
         if not company_name:
             st.error("❌ Debes ingresar el nombre de la compañía.")
             return
-        # if email and not EMAIL_RE.match(email):
-        #     st.error("❌ El correo electrónico no parece válido.")
-        #     return
+        if email and not validate_email(email):
+            st.error("❌ El correo electrónico no parece válido.")
+            return
         if tipo_solicitud.lower() == "proveedor" and not requested_by:
             st.error("❌ Debes ingresar el nombre de quien solicita (proveedor).")
             return
 
         # Persistir en DB
-        request_id = insert_client_request(
-            profile_id=profile_id,
-            company_name=company_name,
-            email=email or None,
-            trading=trading,
-            location=location or None,
-            language=language,
-            reminder_frequency=reminder_frequency,
-            operation_type=tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
-            commodity=commodity if tipo_solicitud.lower() == "cliente" else None,
-            has_customs=aduana,
-            has_port=puerto,
-            has_shipping_line=linea_naviera,
-            requested_by=requested_by,
-            requested_by_type=requested_by_type,
-            user_email= st.user.email
-        )
+        try:
+            request_id = insert_client_request(
+                session,
+                profile_id=profile_id,
+                company_name=company_name,
+                email=email or None,
+                trading=trading,
+                location=location or None,
+                language=language,
+                reminder_frequency=reminder_frequency,
+                operation_type=tipo_operacion if tipo_solicitud.lower() == "cliente" else None,
+                commodity=commodity if tipo_solicitud.lower() == "cliente" else None,
+                has_customs=aduana,
+                has_port=puerto,
+                has_shipping_line=linea_naviera,
+                requested_by=requested_by,
+                requested_by_type=requested_by_type,
+                user_email=st.user.email,
+            )
 
-        if aduana and tipo_aduana:
-            insert_customs_registration(request_id, tipo_aduana)
+            if aduana and tipo_aduana:
+                insert_customs_registration(session, request_id, tipo_aduana)
 
-        if puerto and terminales_seleccionados:
-            insert_port_registration(request_id, terminales_seleccionados)
+            if puerto and terminales_seleccionados:
+                insert_port_registration(session, request_id, terminales_seleccionados)
 
-        if linea_naviera and tipo_linea:
-            line_data = {}
-            for line in tipo_linea:
-                if line == "MSC":
-                    line_data[line] = datos_msc
-                else:
-                    line_data[line] = {}  # otras líneas sin detalles
-            insert_shipping_line_registration(request_id, line_data)
+            if linea_naviera and tipo_linea:
+                line_data = {}
+                for line in tipo_linea:
+                    if line == "MSC":
+                        line_data[line] = datos_msc
+                    else:
+                        line_data[line] = {}
+                insert_shipping_line_registration(session, request_id, line_data)
+        except Exception as e:
+            session.rollback()
+            session.close()
+            st.error(f"Error al guardar la solicitud: {e}")
+            return
 
 
         save_request({
@@ -225,4 +241,5 @@ def forms():
             )
         })
 
-        st.success(f"✅ Solicitud guardada correctamente")
+        session.close()
+        st.success(f"Solicitud guardada correctamente")

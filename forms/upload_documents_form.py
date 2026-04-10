@@ -3,17 +3,31 @@
 import os
 import unicodedata
 import streamlit as st
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-from typing import Optional
-from sqlalchemy import text
+from datetime import datetime
 from database.db import SessionLocal
-from database.crud.documents import *
+from database.crud.documents import (
+    get_all_company_names,
+    get_profiles_list,
+    get_profile_id_by_name,
+    get_requests_by_company_and_profile,
+    get_required_document_types,
+    get_uploaded_documents_map,
+    get_all_statuses,
+    get_shipping_lines_status,
+    get_ports_status,
+    get_customs_status,
+    get_internal_status,
+    get_request_meta,
+    get_request_creation_date,
+    upsert_uploaded_document,
+    upsert_status,
+    upsert_request_info,
+    update_request_meta,
+)
+from utils.timezone import to_colombia_tz
 
 # Google Drive utils
 from services.google_drive_utils import init_drive, find_or_create_folder, upload_to_drive
-
-CO_TZ = ZoneInfo("America/Bogota")
 
 # ==========================
 # 🔧 FUNCIONES AUXILIARES
@@ -26,14 +40,6 @@ def _slug(s: str) -> str:
 
 def is_security_verification(doc_name: str) -> bool:
     return "verificaciones de seguridad" in _slug(doc_name)
-
-
-def _to_colombia_tz(dt: datetime | None) -> datetime | None:
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(CO_TZ)
 
 
 def sanitize_filename(name: str) -> str:
@@ -219,7 +225,7 @@ def forms():
                 if already_internal:
                     for d in already_internal:
                         fecha = (
-                            _to_colombia_tz(d["uploaded_at"]).strftime("%Y-%m-%d %H:%M")
+                            to_colombia_tz(d["uploaded_at"]).strftime("%Y-%m-%d %H:%M")
                             if d.get("uploaded_at") else "sin fecha"
                         )
                         st.markdown(f"- [{d['file_name']}]({d['drive_link']}) • _{d['uploaded_by']}, {fecha}_")
@@ -286,7 +292,7 @@ def forms():
             if already:
                 for d in already:
                     fecha = (
-                        _to_colombia_tz(d["uploaded_at"]).strftime("%Y-%m-%d %H:%M")
+                        to_colombia_tz(d["uploaded_at"]).strftime("%Y-%m-%d %H:%M")
                         if d.get("uploaded_at") else "sin fecha"
                     )
                     st.markdown(f"- [{d['file_name']}]({d['drive_link']}) • _{d['uploaded_by']}, {fecha}_")
@@ -429,42 +435,44 @@ def forms():
                             safe_name = sanitize_filename(file.name)
 
                             # 📂 Crear archivo temporal seguro
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_name}") as tmp_file:
-                                tmp_path = tmp_file.name
-                                tmp_file.write(file.getbuffer())
+                            tmp_path = None
+                            try:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_name}") as tmp_file:
+                                    tmp_path = tmp_file.name
+                                    tmp_file.write(file.getbuffer())
 
-                            drive_link = upload_to_drive(service, folder_id, tmp_path, safe_name)
+                                drive_link = upload_to_drive(service, folder_id, tmp_path, safe_name)
 
-                            # 🔸 Determinar tipo de documento
-                            doc_type_id = None
-                            if isinstance(key, str) and key.startswith("internal_"):
-                                key_suffix = key.replace("internal_", "")
-                                doc_type_id = internal_doc_type_map.get(profile_id, {}).get(key_suffix)
-                            elif isinstance(key, int):
-                                doc_type_id = key
-                            else:
-                                st.warning(f"⚠️ Clave inesperada en uploaded_buffers: {key} (tipo {type(key).__name__})")
-                                os.remove(tmp_path)
-                                continue
+                                # 🔸 Determinar tipo de documento
+                                doc_type_id = None
+                                if isinstance(key, str) and key.startswith("internal_"):
+                                    key_suffix = key.replace("internal_", "")
+                                    doc_type_id = internal_doc_type_map.get(profile_id, {}).get(key_suffix)
+                                elif isinstance(key, int):
+                                    doc_type_id = key
+                                else:
+                                    st.warning(f"⚠️ Clave inesperada en uploaded_buffers: {key} (tipo {type(key).__name__})")
+                                    continue
 
-                            if not doc_type_id:
-                                st.warning(f"⚠️ No se encontró un ID válido de tipo de documento para {key}")
-                                os.remove(tmp_path)
-                                continue
+                                if not doc_type_id:
+                                    st.warning(f"⚠️ No se encontró un ID válido de tipo de documento para {key}")
+                                    continue
 
-                            upsert_uploaded_document(
-                                session,
-                                request_id,
-                                doc_type_id,
-                                safe_name,
-                                drive_link,
-                                st.user.name,
-                                razon_social,
-                                fecha_creacion
-                            )
+                                upsert_uploaded_document(
+                                    session,
+                                    request_id,
+                                    doc_type_id,
+                                    safe_name,
+                                    drive_link,
+                                    st.user.name,
+                                    razon_social,
+                                    fecha_creacion
+                                )
 
-                            os.remove(tmp_path)
-                            changes += 1
+                                changes += 1
+                            finally:
+                                if tmp_path and os.path.exists(tmp_path):
+                                    os.remove(tmp_path)
                     
                     razon_social_val = st.session_state.get(f"razon_social_{request_id}", "").strip()
                     fecha_creacion_val = st.session_state.get(f"fecha_creacion_{request_id}", datetime.now().date())

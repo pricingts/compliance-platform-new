@@ -47,28 +47,12 @@ CREATE TABLE requests (
     has_customs BOOLEAN DEFAULT FALSE,
     has_port BOOLEAN DEFAULT FALSE,
     has_shipping_line BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_email VARCHAR(255)
 );
 
 -- =====================
--- 5. Tabla registration (documentos cargados)
--- =====================
-CREATE TABLE registration (
-    id SERIAL PRIMARY KEY,
-    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
-    doc_type_id INTEGER NOT NULL REFERENCES document_type(id) ON DELETE CASCADE,
-    id_comments INTEGER REFERENCES comments(id),
-    status_id INTEGER REFERENCES status(id),
-    file_name VARCHAR(255),
-    drive_link TEXT,
-    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    uploaded_by VARCHAR(150),
-    razon_social VARCHAR(255),
-    fecha_creacion date 
-);
-
--- =====================
--- 6. Tabla comments
+-- 5. Tabla comments
 -- =====================
 CREATE TABLE comments (
     id SERIAL PRIMARY KEY,
@@ -78,13 +62,30 @@ CREATE TABLE comments (
 );
 
 -- =====================
+-- 6. Tabla registration (documentos cargados)
+-- =====================
+CREATE TABLE registration (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    doc_type_id INTEGER REFERENCES document_type(id) ON DELETE CASCADE,
+    id_comments INTEGER REFERENCES comments(id),
+    status_id INTEGER REFERENCES status(id),
+    file_name VARCHAR(255),
+    drive_link TEXT,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    uploaded_by VARCHAR(150),
+    razon_social VARCHAR(255),
+    fecha_creacion date
+);
+
+-- =====================
 -- 7. Tabla customs_registration (Aduanas)
 -- =====================
 CREATE TABLE customs_registration (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
     customs_name VARCHAR(150) NOT NULL,
-    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
+    status_id INTEGER REFERENCES status(id) ON DELETE SET NULL
 );
 
 -- =====================
@@ -95,7 +96,7 @@ CREATE TABLE port_registration (
     request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
     port_name VARCHAR(150) NOT NULL,
     terminal_name VARCHAR(150),
-    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
+    status_id INTEGER REFERENCES status(id) ON DELETE SET NULL
 );
 
 -- =====================
@@ -110,7 +111,7 @@ CREATE TABLE shipping_line_registration (
     product VARCHAR(255),
     container_type VARCHAR(50),
     shipper_bl VARCHAR(255),
-    status_id INTEGER NOT NULL REFERENCES status(id) ON DELETE CASCADE
+    status_id INTEGER REFERENCES status(id) ON DELETE SET NULL
 );
 
 CREATE TABLE internal_registration (

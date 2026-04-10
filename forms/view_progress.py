@@ -1,6 +1,4 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
 from database.db import SessionLocal
 from database.crud.documents import (
     get_all_company_names,
@@ -22,7 +20,6 @@ from database.crud.documents import (
 # ==========================
 
 def show_progress_view(current_user_email: str | None = None, is_admin: bool = False):
-    st.set_page_config(page_title="📊 Progreso de Solicitudes", layout="wide")
     st.subheader("📊 Visualización del Progreso de Solicitudes")
 
     session = SessionLocal()
@@ -135,15 +132,15 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                     for c in customs:
                         st.write(f"- {c.customs_name}: **{status_map.get(c.status_id, 'Sin estado')}**")
 
-        comments_data = get_comments_by_request(session, request_id)
-        st.markdown("#### 🗒️ Comentarios y Seguimiento")
-        if comments_data:
-            st.write(f"**Comentarios:**")
-            st.write(f"{comments_data['comments'] or '—'}")
-            st.write(f"**Seguimiento / Notificaciones:**")
-            st.write(f"{comments_data['notifications'] or '—'}")
-        else:
-            st.caption("Sin comentarios registrados para esta solicitud.")
+            comments_data = get_comments_by_request(session, request_id)
+            st.markdown("#### 🗒️ Comentarios y Seguimiento")
+            if comments_data:
+                st.write(f"**Comentarios:**")
+                st.write(f"{comments_data['comments'] or '—'}")
+                st.write(f"**Seguimiento / Notificaciones:**")
+                st.write(f"{comments_data['notifications'] or '—'}")
+            else:
+                st.caption("Sin comentarios registrados para esta solicitud.")
 
     finally:
         session.close()

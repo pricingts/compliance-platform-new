@@ -1,0 +1,36 @@
+[project]
+name = "compliance-platform"
+version = "0.1.0"
+description = "Compliance management platform"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit==1.44.1",
+    "sqlalchemy==2.0.40",
+    "psycopg2-binary==2.9.11",
+    "Authlib==1.6.0",
+    "reportlab==4.4.0",
+    "gspread==6.2.0",
+    "PyPDF2==3.0.1",
+    "google-api-python-client==2.166.0",
+    "python-dotenv==1.1.0",
+    "pydrive2==1.21.3",
+    "alembic==1.15.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
