@@ -10,6 +10,7 @@ from database.crud.clientes import (
 from services.sheets_writer import save_request
 from services.logging_config import get_logger
 from utils.error_handlers import handle_error
+from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
     COMERCIALES,
@@ -424,6 +425,7 @@ def forms():
     """
     session = SessionLocal()
     try:
+        render_section_header("1. Tipo de Solicitud")
         tipo_solicitud, profile_id = _render_request_type_selector(session)
         if tipo_solicitud is None:
             return
@@ -431,11 +433,13 @@ def forms():
         requested_by, requested_by_type = _render_requester_section(
             tipo_solicitud
         )
+        render_section_header("2. Datos de la Compania")
         company_info = _render_company_info()
 
         # Client-specific fields
         client_data = {}
         if tipo_solicitud.lower() == "cliente":
+            render_section_header("3. Operacion y Registros")
             client_data = _render_client_specifics()
         else:
             st.selectbox(

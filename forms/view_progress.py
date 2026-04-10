@@ -10,6 +10,7 @@ from database.crud.documents import (
     get_requests_for_progress,
 )
 from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
+from utils.ui_helpers import status_badge
 from config.constants import DEFAULT_PAGE_SIZE
 
 # ==========================
@@ -110,13 +111,14 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
 
             internal_status_id = get_internal_status(session, request_id)
             internal_status = status_map.get(internal_status_id, "Sin estado")
-            st.write(f"**Registro Interno:** {internal_status}")
+            st.markdown(f"**Registro Interno:** {status_badge(internal_status)}", unsafe_allow_html=True)
 
             lines = get_shipping_lines_status(session, request_id)
             if lines:
                 with st.expander("🚢 Líneas Navieras", expanded=True):
                     for line in lines:
-                        st.write(f"- {line.line_name}: **{status_map.get(line.status_id, 'Sin estado')}**")
+                        sname = status_map.get(line.status_id, "Sin estado")
+                    st.markdown(f"- {line.line_name}: {status_badge(sname)}", unsafe_allow_html=True)
 
             ports = get_ports_status(session, request_id)
             if ports:
@@ -129,14 +131,16 @@ def show_progress_view(current_user_email: str | None = None, is_admin: bool = F
                         st.write(f"**{port}**")
                         for term in terminals:
                             terminal_label = f" ({term.terminal_name})" if term.terminal_name else ""
-                            st.write(f" - Terminal{terminal_label}: **{status_map.get(term.status_id, 'Sin estado')}**")
+                            sname = status_map.get(term.status_id, "Sin estado")
+                            st.markdown(f" - Terminal{terminal_label}: {status_badge(sname)}", unsafe_allow_html=True)
 
             # === Aduanas
             customs = get_customs_status(session, request_id)
             if customs:
                 with st.expander("🧾 Aduanas", expanded=True):
                     for c in customs:
-                        st.write(f"- {c.customs_name}: **{status_map.get(c.status_id, 'Sin estado')}**")
+                        sname = status_map.get(c.status_id, "Sin estado")
+                    st.markdown(f"- {c.customs_name}: {status_badge(sname)}", unsafe_allow_html=True)
 
             comments_data = get_comments_by_request(session, request_id)
             st.markdown("#### 🗒️ Comentarios y Seguimiento")

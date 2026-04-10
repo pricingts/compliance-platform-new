@@ -24,6 +24,7 @@ from database.crud.documents import (
 )
 from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
+from utils.ui_helpers import render_section_header
 from utils.error_handlers import handle_error
 from services.logging_config import get_logger
 
@@ -550,6 +551,7 @@ def forms():
 
     try:
         # === Company and profile selection ===
+        render_section_header("1. Seleccion de Solicitud")
         result = _render_company_profile_selector(session)
         if result is None:
             return
@@ -561,17 +563,20 @@ def forms():
             return
 
         # === Base data (razon social, fecha) ===
+        render_section_header("2. Datos Base")
         razon_social, fecha_creacion = _render_base_data(request_id, session)
 
         status_map = get_all_statuses(session)
         status_labels = list(status_map.keys())
 
         # === Internal documents block ===
+        render_section_header("3. Documentos Internos")
         internal_buffers, internal_status_label = _render_internal_docs(
             session, profile_id, request_id, status_map, status_labels
         )
 
         # === Required documents block (aduanas / puertos / navieras) ===
+        render_section_header("4. Documentos Requeridos")
         required_buffers = _render_required_docs(
             session, profile_id, request_id, status_map, status_labels
         )
@@ -580,6 +585,7 @@ def forms():
         uploaded_buffers = {**internal_buffers, **required_buffers}
 
         # === Followup and comments ===
+        render_section_header("5. Seguimiento y Comentarios")
         seguimiento_text, comentarios_text = _render_followup_section(request_id, session)
 
         # === Save everything ===
