@@ -35,7 +35,12 @@
 /* Sidebar header (brand logo area) */
 [data-testid="stSidebarHeader"] {
     border-bottom: 1px solid #334155 !important;
-    padding: 12px 16px 12px 16px !important;
+    padding: 16px 16px 14px 16px !important;
+}
+
+[data-testid="stSidebarHeader"] img {
+    max-height: 56px !important;
+    width: auto !important;
 }
 
 /* User content fills remaining space */
