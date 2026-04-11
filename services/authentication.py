@@ -16,6 +16,11 @@ def check_authentication():
 
     if not st.session_state.authenticated:
         if not st.user.is_logged_in:
+            # Hide sidebar on login screen
+            st.markdown(
+                "<style>[data-testid='stSidebar']{display:none}</style>",
+                unsafe_allow_html=True,
+            )
             st.warning("Por favor, inicia sesion primero.")
             if st.button("Log in"):
                 st.login()

@@ -20,6 +20,7 @@ def identity_role(email: Optional[str]) -> str:
 # --- Authentication ---
 check_authentication()
 
+# If we reach here, user is authenticated
 _st_user = getattr(st, "user", None)
 user_email = getattr(_st_user, "email", None) if _st_user else None
 user_name = getattr(_st_user, "name", "Usuario") if _st_user else "Developer"
@@ -36,7 +37,7 @@ is_admin = (role == "compliance")
 st.session_state["_user_email"] = user_email
 st.session_state["_is_admin"] = is_admin
 
-# --- Navigation ---
+# --- Navigation (only rendered when authenticated) ---
 pages_compliance = [
     st.Page("views/request.py", title="Solicitud de Creacion", icon=":material/edit_note:"),
     st.Page("views/upload_documents.py", title="Registro de Documentos", icon=":material/upload_file:"),
@@ -50,10 +51,9 @@ pages_other = [
 
 pages = pages_compliance if is_admin else pages_other
 
-# --- Navigation (renders nav links at top of sidebar) ---
 pg = st.navigation(pages)
 
-# --- Sidebar: user info below nav ---
+# --- Sidebar: brand + user info ---
 with st.sidebar:
     render_sidebar_brand()
     render_sidebar_user(user_name or "", user_email or "")
