@@ -468,6 +468,126 @@ def get_requests_for_progress(
 
 
 # ==========================
+# COMMENT ENTRIES (threaded)
+# ==========================
+
+def insert_comment_entry(
+    session: Session,
+    request_id: int,
+    author_email: str,
+    author_name: str,
+    content: str,
+    entry_type: str = "comment",
+    image_drive_link: Optional[str] = None,
+    image_file_name: Optional[str] = None,
+) -> int:
+    """Insert a new comment entry and return its id."""
+    result = session.execute(
+        text("""
+            INSERT INTO comment_entries
+                (request_id, author_email, author_name, content, entry_type,
+                 image_drive_link, image_file_name)
+            VALUES
+                (:request_id, :author_email, :author_name, :content, :entry_type,
+                 :image_drive_link, :image_file_name)
+            RETURNING id
+        """),
+        {
+            "request_id": request_id,
+            "author_email": author_email,
+            "author_name": author_name,
+            "content": content,
+            "entry_type": entry_type,
+            "image_drive_link": image_drive_link,
+            "image_file_name": image_file_name,
+        },
+    )
+    return result.scalar()
+
+
+def get_comment_entries(session: Session, request_id: int) -> list[dict]:
+    """Return all comment entries for a request, newest first."""
+    rows = session.execute(
+        text("""
+            SELECT id, author_email, author_name, content, entry_type,
+                   image_drive_link, image_file_name, created_at
+            FROM comment_entries
+            WHERE request_id = :rid
+            ORDER BY created_at DESC
+        """),
+        {"rid": request_id},
+    ).fetchall()
+
+    return [
+        {
+            "id": r.id,
+            "author_email": r.author_email,
+            "author_name": r.author_name,
+            "content": r.content,
+            "entry_type": r.entry_type,
+            "image_drive_link": r.image_drive_link,
+            "image_file_name": r.image_file_name,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+# ==========================
+# NOTIFICATIONS
+# ==========================
+
+def insert_notification(
+    session: Session,
+    user_email: str,
+    request_id: int,
+    message: str,
+) -> None:
+    """Create an in-app notification for a user."""
+    session.execute(
+        text("""
+            INSERT INTO notifications (user_email, request_id, message)
+            VALUES (:user_email, :request_id, :message)
+        """),
+        {"user_email": user_email, "request_id": request_id, "message": message},
+    )
+
+
+def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
+    """Return unread notifications for a user."""
+    rows = session.execute(
+        text("""
+            SELECT n.id, n.request_id, n.message, n.created_at,
+                   r.company_name
+            FROM notifications n
+            LEFT JOIN requests r ON r.id = n.request_id
+            WHERE n.user_email = :email AND n.is_read = FALSE
+            ORDER BY n.created_at DESC
+        """),
+        {"email": user_email},
+    ).fetchall()
+
+    return [
+        {
+            "id": r.id,
+            "request_id": r.request_id,
+            "message": r.message,
+            "created_at": r.created_at,
+            "company_name": r.company_name,
+        }
+        for r in rows
+    ]
+
+
+def mark_notifications_read(session: Session, user_email: str) -> None:
+    """Mark all notifications as read for a user."""
+    session.execute(
+        text("UPDATE notifications SET is_read = TRUE WHERE user_email = :email"),
+        {"email": user_email},
+    )
+
+
+# ==========================
 # AUDIT TIMELINE
 # ==========================
 
