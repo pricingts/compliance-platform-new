@@ -8,11 +8,14 @@ from database.crud.documents import (
     get_ports_status,
     get_customs_status,
     get_comments_by_request,
+    get_comment_entries,
     get_razon_social_by_request,
     get_requests_for_progress,
+    get_audit_timeline,
 )
 from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
 from utils.ui_helpers import status_badge
+from utils.timezone import to_colombia_tz
 from config.constants import DEFAULT_PAGE_SIZE
 
 # ==========================
@@ -20,12 +23,19 @@ from config.constants import DEFAULT_PAGE_SIZE
 # ==========================
 
 def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool = False):
-    st.subheader("📊 Visualización del Progreso de Solicitudes")
+    st.subheader("Visualizacion del Progreso de Solicitudes")
 
     session = SessionLocal()
 
     try:
         email_filter = None if is_admin else (current_user_email or None)
+
+        # --- Quick search (C2) ---
+        search_term = st.text_input(
+            "Buscar por empresa, ID o email",
+            placeholder="Escribe para filtrar...",
+            key="progress_search",
+        )
 
         page_key = "progress_page"
         if page_key not in st.session_state:
@@ -40,6 +50,17 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
         if not requests:
             st.info("No hay solicitudes para mostrar.")
             return
+
+        # Apply search filter
+        if search_term:
+            term = search_term.lower().strip()
+            requests = [
+                r for r in requests
+                if term in (r.get("company_name") or "").lower()
+                or term in str(r.get("id", ""))
+                or term in (r.get("user_email") or "").lower()
+            ]
+            total_count = len(requests)
 
         companies = sorted({r.get("company_name") for r in requests if r.get("company_name")})
 
@@ -144,15 +165,87 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
                         sname = status_map.get(c.status_id, "Sin estado")
                     st.markdown(f"- {c.customs_name}: {status_badge(sname)}", unsafe_allow_html=True)
 
-            comments_data = get_comments_by_request(session, request_id)
-            st.markdown("#### 🗒️ Comentarios y Seguimiento")
-            if comments_data:
-                st.write("**Comentarios:**")
-                st.write(f"{comments_data['comments'] or '—'}")
-                st.write("**Seguimiento / Notificaciones:**")
-                st.write(f"{comments_data['notifications'] or '—'}")
-            else:
-                st.caption("Sin comentarios registrados para esta solicitud.")
+            # === Progress bar (A3) ===
+            total_items = 0
+            approved_items = 0
+            approved_status_id = None
+            # status_map is {id: name} from status_id_to_name_map()
+            for s_id, s_name in status_map.items():
+                if isinstance(s_name, str) and "aprobado" in s_name.lower():
+                    approved_status_id = s_id
+                    break
+
+            if lines:
+                total_items += len(lines)
+                approved_items += sum(1 for ln in lines if ln.status_id == approved_status_id)
+            if ports:
+                total_items += len(ports)
+                approved_items += sum(1 for p in ports if p.status_id == approved_status_id)
+            if customs:
+                total_items += len(customs)
+                approved_items += sum(1 for c in customs if c.status_id == approved_status_id)
+            if internal_status_id == approved_status_id:
+                approved_items += 1
+            total_items += 1  # internal always counts
+
+            if total_items > 0:
+                pct = approved_items / total_items
+                st.markdown(f"**Progreso general:** {approved_items}/{total_items} aprobados")
+                st.progress(pct)
+
+            # === Threaded comments (B1) ===
+            comment_entries = get_comment_entries(session, request_id)
+            with st.expander("Comentarios y Seguimiento", expanded=bool(comment_entries)):
+                if comment_entries:
+                    for entry in comment_entries:
+                        created = entry["created_at"]
+                        date_str = (
+                            to_colombia_tz(created).strftime("%Y-%m-%d %H:%M")
+                            if created else "sin fecha"
+                        )
+                        author = entry["author_name"] or entry["author_email"]
+                        entry_type = entry["entry_type"]
+                        type_tag = {"rechazo": " [RECHAZO]", "nota": " [NOTA]"}.get(entry_type, "")
+
+                        st.markdown(f"**{author}**{type_tag} - _{date_str}_")
+                        st.markdown(f"> {entry['content']}")
+
+                        if entry.get("image_drive_link"):
+                            st.markdown(f"[{entry.get('image_file_name', 'imagen')}]({entry['image_drive_link']})")
+
+                        st.markdown("---")
+                else:
+                    # Fall back to legacy comments
+                    comments_data = get_comments_by_request(session, request_id)
+                    if comments_data:
+                        st.write("**Comentarios:**")
+                        st.write(f"{comments_data['comments'] or '—'}")
+                        st.write("**Seguimiento / Notificaciones:**")
+                        st.write(f"{comments_data['notifications'] or '—'}")
+                    else:
+                        st.caption("Sin comentarios registrados.")
+
+            # === Activity timeline (A1) ===
+            timeline = get_audit_timeline(session, request_id)
+            if timeline:
+                with st.expander("Historial de actividad", expanded=False):
+                    for event in timeline:
+                        ts = event["timestamp"]
+                        ts_str = (
+                            to_colombia_tz(ts).strftime("%Y-%m-%d %H:%M")
+                            if ts else "—"
+                        )
+                        action_icons = {
+                            "CREATE": "🆕",
+                            "UPLOAD": "📎",
+                            "STATUS_CHANGE": "🔄",
+                            "UPDATE": "✏️",
+                        }
+                        icon = action_icons.get(event["action"], "•")
+                        user = event["user_email"].split("@")[0] if event["user_email"] else "—"
+                        detail = event["details"] or event["action"]
+
+                        st.markdown(f"{icon} **{ts_str}** - {user} - {detail}")
 
         # --- Pagination controls ---
         total_pages = max(1, (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE)

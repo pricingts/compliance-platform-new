@@ -21,6 +21,8 @@ from database.crud.documents import (
     upsert_status,
     upsert_request_info,
     update_request_meta,
+    insert_comment_entry,
+    get_comment_entries,
 )
 from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
@@ -251,7 +253,7 @@ def _render_internal_docs(session, profile_id, request_id, status_map, status_la
 
             uploaded_buffers[f"internal_{key_suffix}"] = st.file_uploader(
                 label="Subir archivo",
-                type=["pdf"],
+                type=["pdf", "jpg", "jpeg", "png"],
                 key=f"uploader_internal_{key_suffix}_{request_id}",
                 accept_multiple_files=True
             )
@@ -306,7 +308,7 @@ def _render_required_docs(session, profile_id, request_id, status_map, status_la
         # ---- uploader unico ----
         uploaded_buffers[doc_id] = st.file_uploader(
             label="Subir documento",
-            type=["pdf"],
+            type=["pdf", "jpg", "jpeg", "png"],
             key=f"uploader_{request_id}_{doc_id}",
             accept_multiple_files=True
         )
@@ -387,27 +389,86 @@ def _render_required_docs(session, profile_id, request_id, status_map, status_la
 
 
 def _render_followup_section(request_id, session):
-    """Render comments and notifications text areas.
+    """Render threaded comment history + new comment input.
 
-    Returns (notifications, comments).
+    Returns (notifications, comments) for backward-compat with legacy
+    comments table, plus handles new comment_entries insertion.
     """
     st.subheader("Seguimiento y comentarios")
 
+    # --- Display existing threaded comments ---
+    entries = get_comment_entries(session, request_id)
+    if entries:
+        for entry in entries:
+            created = entry["created_at"]
+            date_str = (
+                to_colombia_tz(created).strftime("%Y-%m-%d %H:%M")
+                if created else "sin fecha"
+            )
+            author = entry["author_name"] or entry["author_email"]
+            entry_type = entry["entry_type"]
+
+            type_icon = {"comment": "", "rechazo": " [RECHAZO]", "nota": " [NOTA]"}.get(entry_type, "")
+
+            st.markdown(
+                f"**{author}**{type_icon} - _{date_str}_\n\n"
+                f"> {entry['content']}"
+            )
+
+            # Show image thumbnail if present
+            if entry.get("image_drive_link"):
+                img_name = entry.get("image_file_name", "imagen")
+                st.markdown(f"[{img_name}]({entry['image_drive_link']})")
+
+            st.markdown("---")
+    else:
+        st.caption("Sin comentarios registrados.")
+
+    # --- New comment input ---
+    st.markdown("**Agregar comentario:**")
+    new_comment = st.text_area(
+        "Escribe un comentario",
+        height=100,
+        key=f"new_comment_{request_id}",
+        placeholder="Escribe un comentario o nota de seguimiento..."
+    )
+
+    comment_type = st.selectbox(
+        "Tipo",
+        ["comment", "nota"],
+        format_func=lambda x: {"comment": "Comentario", "nota": "Nota de seguimiento"}.get(x, x),
+        key=f"comment_type_{request_id}",
+    )
+
+    comment_image = st.file_uploader(
+        "Adjuntar imagen (opcional)",
+        type=["jpg", "jpeg", "png"],
+        key=f"comment_image_{request_id}",
+    )
+
+    # Store new comment data in session_state for processing in _save_all_data
+    st.session_state[f"_pending_comment_{request_id}"] = {
+        "text": new_comment,
+        "type": comment_type,
+        "image": comment_image,
+    }
+
+    # --- Legacy follow-up fields (backward compat) ---
     meta = get_request_meta(session, request_id) or {}
     notif_default = (meta.get("notification_followup") or "").strip()
     comments_default = (meta.get("general_comments") or "").strip()
 
-    seguimiento_text = st.text_area(
-        "Seguimiento de notificación",
-        value=notif_default,
-        height=150
-    )
-
-    comentarios_text = st.text_area(
-        "Comentarios generales",
-        value=comments_default,
-        height=150
-    )
+    with st.expander("Campos legacy (seguimiento / notificaciones)", expanded=False):
+        seguimiento_text = st.text_area(
+            "Seguimiento de notificacion",
+            value=notif_default,
+            height=100
+        )
+        comentarios_text = st.text_area(
+            "Comentarios generales (legacy)",
+            value=comments_default,
+            height=100
+        )
 
     return (seguimiento_text, comentarios_text)
 
@@ -538,10 +599,58 @@ def _save_all_data(
             name = key.replace("status_customs_", "")
             upsert_status(session, "customs_registration", request_id, name, status_map[value], user_email=user_email)
 
-    # === Guardar comentarios ===
+    # === Guardar comentarios legacy ===
     update_request_meta(session, request_id, notifications, comments)
 
-    # Audit: log comment update
+    # === Guardar nuevo comentario (threaded) ===
+    pending = st.session_state.get(f"_pending_comment_{request_id}", {})
+    comment_text = (pending.get("text") or "").strip()
+    if comment_text and user_email:
+        image_link = None
+        image_name = None
+
+        # Upload comment image to Drive if present
+        comment_image = pending.get("image")
+        if comment_image:
+            try:
+                service = init_drive()
+                CLIENTS_FOLDER_ID = st.secrets["drive"].get("clients_folder_id")
+                safe_img_name = sanitize_filename(comment_image.name)
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_img_name}") as tmp:
+                        tmp_path = tmp.name
+                        tmp.write(comment_image.getbuffer())
+                    image_link = upload_to_drive(service, CLIENTS_FOLDER_ID, tmp_path, safe_img_name)
+                    image_name = safe_img_name
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to upload comment image: {e}")
+
+        insert_comment_entry(
+            session=session,
+            request_id=request_id,
+            author_email=user_email,
+            author_name=uploaded_by,
+            content=comment_text,
+            entry_type=pending.get("type", "comment"),
+            image_drive_link=image_link,
+            image_file_name=image_name,
+        )
+
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="CREATE",
+            entity_type="comment_entry",
+            entity_id=request_id,
+            new_value={"content": comment_text[:200], "type": pending.get("type", "comment")},
+            details=f"Request #{request_id}: new comment",
+        )
+
+    # Audit: log legacy comment update
     if user_email and (notifications or comments):
         log_action(
             session=session,
