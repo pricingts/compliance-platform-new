@@ -56,7 +56,7 @@ pg = st.navigation(pages)
 # --- Sidebar: user info below nav ---
 with st.sidebar:
     render_sidebar_brand()
-    render_sidebar_user(user_email or "")
+    render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):
         if st.button("Cerrar sesion", use_container_width=True):
             st.logout()

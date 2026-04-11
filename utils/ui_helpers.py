@@ -57,12 +57,19 @@ def render_sidebar_brand() -> None:
     )
 
 
-def render_sidebar_user(email: str) -> None:
-    """Render user info in sidebar footer."""
+def render_sidebar_user(name: str, email: str) -> None:
+    """Render user info in sidebar footer with name and email."""
+    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
     st.markdown(
         f"""
         <div class="sidebar-user">
-            <div class="sidebar-user-email">{email}</div>
+            <div class="sidebar-user-row">
+                <div class="sidebar-user-avatar">{initials}</div>
+                <div class="sidebar-user-info">
+                    <div class="sidebar-user-name">{name}</div>
+                    <div class="sidebar-user-email">{email}</div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
