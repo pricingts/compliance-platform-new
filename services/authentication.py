@@ -1,9 +1,18 @@
 import streamlit as st
 
+# st.user requires Streamlit >= 1.55 (Streamlit Cloud OAuth).
+# For local development, we auto-authenticate as a dev user.
+_has_st_user = hasattr(st, "user") and hasattr(getattr(st, "user", None), "is_logged_in")
+
 
 def check_authentication():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
+
+    if not _has_st_user:
+        # Local dev mode — auto-authenticate
+        st.session_state.authenticated = True
+        return
 
     if not st.session_state.authenticated:
         if not st.user.is_logged_in:

@@ -1,2 +1,4 @@
 .streamlit/secrets.toml
 .env.superpowers/
+local_dev.db
+.env

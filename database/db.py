@@ -22,13 +22,16 @@ def _get_database_url() -> str:
 
 DATABASE_URL = _get_database_url()
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_recycle=1800,
-    pool_pre_ping=True,
-)
+_engine_kwargs = {}
+if not DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs.update(
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+    )
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

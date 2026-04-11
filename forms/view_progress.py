@@ -1,3 +1,5 @@
+from typing import Optional
+
 import streamlit as st
 from database.db import SessionLocal
 from database.crud.documents import (
@@ -17,7 +19,7 @@ from config.constants import DEFAULT_PAGE_SIZE
 #   VISTA DE PROGRESO
 # ==========================
 
-def show_progress_view(current_user_email: str | None = None, is_admin: bool = False):
+def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool = False):
     st.subheader("📊 Visualización del Progreso de Solicitudes")
 
     session = SessionLocal()

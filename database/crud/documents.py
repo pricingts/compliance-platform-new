@@ -378,7 +378,7 @@ def get_razon_social_by_request(session: Session, request_id: int) -> Optional[d
 
 def get_requests_for_progress(
     session: Session,
-    only_for_email: str | None = None,
+    only_for_email: Optional[str] = None,
     page: int = 0,
     page_size: int = 20,
 ) -> tuple[list[dict], int]:

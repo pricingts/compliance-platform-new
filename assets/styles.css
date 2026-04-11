@@ -23,15 +23,33 @@
     background-color: var(--primary-dark) !important;
 }
 
+
+
+/* Nav items: high-contrast white text for readability */
 [data-testid="stSidebar"] [data-testid="stMarkdown"] p,
 [data-testid="stSidebar"] [data-testid="stMarkdown"] span,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .st-emotion-cache-1gwvy71 {
-    color: #cbd5e1 !important;
+[data-testid="stSidebar"] label {
+    color: #e2e8f0 !important;
 }
 
+/* Navigation link text — must be bright enough against dark sidebar */
+[data-testid="stSidebar"] a,
+[data-testid="stSidebar"] a span,
+[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] span,
+[data-testid="stSidebar"] nav a {
+    color: #e2e8f0 !important;
+}
+
+/* Active nav link */
+[data-testid="stSidebar"] [data-testid="stSidebarNavLink"][aria-selected="true"] span {
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+/* Sidebar separators */
 [data-testid="stSidebar"] hr {
     border-color: #334155 !important;
+    margin: 8px 0 !important;
 }
 
 .sidebar-brand {

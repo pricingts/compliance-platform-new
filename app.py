@@ -20,8 +20,14 @@ def identity_role(email: Optional[str]) -> str:
 # --- Authentication ---
 check_authentication()
 
-user_email = getattr(getattr(st, "user", None), "email", None)
-user_name = getattr(getattr(st, "user", None), "name", "Usuario")
+_st_user = getattr(st, "user", None)
+user_email = getattr(_st_user, "email", None) if _st_user else None
+user_name = getattr(_st_user, "name", "Usuario") if _st_user else "Developer"
+
+# Local dev fallback: use env var or default admin email
+if user_email is None:
+    import os
+    user_email = os.environ.get("DEV_USER_EMAIL", "jsanchez@tradingsolutions.com")
 
 role = identity_role(user_email)
 is_admin = (role == "compliance")
@@ -44,19 +50,17 @@ pages_other = [
 
 pages = pages_compliance if is_admin else pages_other
 
-# --- Sidebar ---
-with st.sidebar:
-    render_sidebar_brand()
-    st.markdown("---")
+# --- Sidebar: Logo at top (st.logo always renders above nav) ---
+st.logo("images/logo_trading.png")
 
 pg = st.navigation(pages)
 
 with st.sidebar:
-    st.markdown("---")
     render_sidebar_user(user_email or "")
-    if st.button("Cerrar sesion", use_container_width=True):
-        st.logout()
-        st.session_state.authenticated = False
-        st.rerun()
+    if hasattr(st, "logout"):
+        if st.button("Cerrar sesion", use_container_width=True):
+            st.logout()
+            st.session_state.authenticated = False
+            st.rerun()
 
 pg.run()
