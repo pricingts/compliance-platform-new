@@ -50,12 +50,12 @@ pages_other = [
 
 pages = pages_compliance if is_admin else pages_other
 
-# --- Sidebar: Logo at top (st.logo always renders above nav) ---
-st.logo("images/logo_trading.png")
-
+# --- Navigation (renders nav links at top of sidebar) ---
 pg = st.navigation(pages)
 
+# --- Sidebar: user info below nav ---
 with st.sidebar:
+    render_sidebar_brand()
     render_sidebar_user(user_email or "")
     if hasattr(st, "logout"):
         if st.button("Cerrar sesion", use_container_width=True):
