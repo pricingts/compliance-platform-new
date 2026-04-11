@@ -51,11 +51,13 @@ pages_other = [
 
 pages = pages_compliance if is_admin else pages_other
 
+# --- Sidebar brand in header (above nav) ---
+st.logo("images/logo_trading.png")
+
 pg = st.navigation(pages)
 
-# --- Sidebar: brand + user info ---
+# --- Sidebar: user info at bottom ---
 with st.sidebar:
-    render_sidebar_brand()
     render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):
         if st.button("Cerrar sesion", use_container_width=True):
