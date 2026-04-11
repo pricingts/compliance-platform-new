@@ -5,6 +5,8 @@ import streamlit as st
 from services.authentication import check_authentication
 from config.settings import get_admin_emails
 from utils.ui_helpers import load_css, render_sidebar_user
+from database.db import SessionLocal
+from database.crud.documents import get_unread_notifications, mark_notifications_read
 
 st.set_page_config(page_title="Compliance Platform", layout="wide")
 load_css()
@@ -57,8 +59,24 @@ st.logo("assets/brand_sidebar.svg", icon_image="assets/brand_sidebar_small.svg")
 
 pg = st.navigation(pages)
 
-# --- Sidebar: user info at bottom ---
+# --- Sidebar: notifications + user info ---
 with st.sidebar:
+    # Notifications badge (A2)
+    try:
+        _notif_session = SessionLocal()
+        notifications = get_unread_notifications(_notif_session, user_email or "")
+        if notifications:
+            with st.expander(f"Notificaciones ({len(notifications)})", expanded=False):
+                for n in notifications[:10]:
+                    st.markdown(f"- {n['message']}")
+                if st.button("Marcar como leidas", key="mark_read"):
+                    mark_notifications_read(_notif_session, user_email or "")
+                    _notif_session.commit()
+                    st.rerun()
+        _notif_session.close()
+    except Exception:
+        pass
+
     render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):
         if st.button("Cerrar sesion", use_container_width=True):

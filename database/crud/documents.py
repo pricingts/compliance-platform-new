@@ -307,6 +307,29 @@ def upsert_status(
             details=f"Request #{request_id}: {entity_label}",
         )
 
+        # --- Notify the request owner about status change (A2) ---
+        request_owner = session.execute(
+            text("SELECT user_email, company_name FROM requests WHERE id = :rid"),
+            {"rid": request_id},
+        ).fetchone()
+        if request_owner and request_owner.user_email and request_owner.user_email != user_email:
+            # Resolve status names for the notification message
+            old_name = session.execute(
+                text("SELECT status FROM status WHERE id = :sid"),
+                {"sid": old_status_id},
+            ).scalar() or "sin estado"
+            new_name = session.execute(
+                text("SELECT status FROM status WHERE id = :sid"),
+                {"sid": status_id},
+            ).scalar() or "sin estado"
+
+            insert_notification(
+                session=session,
+                user_email=request_owner.user_email,
+                request_id=request_id,
+                message=f"{entity_label} cambio de '{old_name}' a '{new_name}' ({request_owner.company_name or 'solicitud'})",
+            )
+
 def batch_upsert_statuses(
     session: Session,
     updates: list[dict],
@@ -618,3 +641,23 @@ def get_audit_timeline(session: Session, request_id: int, limit: int = 50) -> li
         }
         for r in rows
     ]
+
+
+def get_last_status_change_time(session: Session, entity_type: str, entity_id: int) -> Optional[datetime]:
+    """Return the timestamp of the last STATUS_CHANGE for an entity.
+
+    Used for SLA tracking (C4) - how long an item has been in its current status.
+    """
+    row = session.execute(
+        text("""
+            SELECT timestamp
+            FROM audit_log
+            WHERE action = 'STATUS_CHANGE'
+              AND entity_type = :entity_type
+              AND entity_id = :entity_id
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """),
+        {"entity_type": entity_type, "entity_id": entity_id},
+    ).fetchone()
+    return row.timestamp if row else None

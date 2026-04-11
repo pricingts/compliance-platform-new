@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 import streamlit as st
 from database.db import SessionLocal
@@ -12,11 +13,29 @@ from database.crud.documents import (
     get_razon_social_by_request,
     get_requests_for_progress,
     get_audit_timeline,
+    get_last_status_change_time,
 )
 from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
 from utils.ui_helpers import status_badge
 from utils.timezone import to_colombia_tz
 from config.constants import DEFAULT_PAGE_SIZE
+
+
+def _sla_badge(last_change: Optional[datetime]) -> str:
+    """Return an HTML badge indicating time in current status."""
+    if not last_change:
+        return ""
+    delta = datetime.utcnow() - last_change
+    days = delta.days
+    if days < 3:
+        color = "#10b981"  # green
+    elif days < 7:
+        color = "#f59e0b"  # amber
+    else:
+        color = "#ef4444"  # red
+
+    label = f"{days}d" if days > 0 else "hoy"
+    return f' <span style="background:{color};color:white;padding:1px 6px;border-radius:8px;font-size:11px;">{label}</span>'
 
 # ==========================
 #   VISTA DE PROGRESO
@@ -138,14 +157,15 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
 
             lines = get_shipping_lines_status(session, request_id)
             if lines:
-                with st.expander("🚢 Líneas Navieras", expanded=True):
+                with st.expander("Lineas Navieras", expanded=True):
                     for line in lines:
                         sname = status_map.get(line.status_id, "Sin estado")
-                    st.markdown(f"- {line.line_name}: {status_badge(sname)}", unsafe_allow_html=True)
+                        sla = _sla_badge(get_last_status_change_time(session, "shipping_line_registration", line.id))
+                        st.markdown(f"- {line.line_name}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
             ports = get_ports_status(session, request_id)
             if ports:
-                with st.expander("⚓ Puertos y Terminales", expanded=True):
+                with st.expander("Puertos y Terminales", expanded=True):
                     grouped_ports = {}
                     for p in ports:
                         grouped_ports.setdefault(p.port_name, []).append(p)
@@ -155,15 +175,16 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
                         for term in terminals:
                             terminal_label = f" ({term.terminal_name})" if term.terminal_name else ""
                             sname = status_map.get(term.status_id, "Sin estado")
-                            st.markdown(f" - Terminal{terminal_label}: {status_badge(sname)}", unsafe_allow_html=True)
+                            sla = _sla_badge(get_last_status_change_time(session, "port_registration", term.id))
+                            st.markdown(f" - Terminal{terminal_label}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
-            # === Aduanas
             customs = get_customs_status(session, request_id)
             if customs:
-                with st.expander("🧾 Aduanas", expanded=True):
+                with st.expander("Aduanas", expanded=True):
                     for c in customs:
                         sname = status_map.get(c.status_id, "Sin estado")
-                    st.markdown(f"- {c.customs_name}: {status_badge(sname)}", unsafe_allow_html=True)
+                        sla = _sla_badge(get_last_status_change_time(session, "customs_registration", c.id))
+                        st.markdown(f"- {c.customs_name}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
             # === Progress bar (A3) ===
             total_items = 0
