@@ -6,6 +6,8 @@ from sqlalchemy import text
 from datetime import datetime
 from typing import Optional
 
+from services.audit import log_action
+
 # ==========================
 # 🔹 EMPRESAS Y PERFILES
 # ==========================
@@ -86,10 +88,17 @@ def get_uploaded_documents_map(session: Session, request_id: int) -> dict[int, l
     return grouped
 
 
-def upsert_uploaded_document(session: Session, request_id: int, document_type_id: int,
-                             file_name: str, drive_link: str, uploaded_by: str,
-                            razon_social: Optional[str] = None,
-                            fecha_creacion: Optional[datetime] = None) -> None:
+def upsert_uploaded_document(
+    session: Session,
+    request_id: int,
+    document_type_id: int,
+    file_name: str,
+    drive_link: str,
+    uploaded_by: str,
+    razon_social: Optional[str] = None,
+    fecha_creacion: Optional[datetime] = None,
+    user_email: Optional[str] = None,
+) -> None:
     session.execute(
         text("""
             INSERT INTO registration (request_id, doc_type_id, file_name, drive_link, uploaded_by, razon_social, fecha_creacion)
@@ -105,6 +114,17 @@ def upsert_uploaded_document(session: Session, request_id: int, document_type_id
             "fecha_creacion": fecha_creacion
         }
     )
+
+    if user_email:
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="UPLOAD",
+            entity_type="registration",
+            entity_id=request_id,
+            new_value={"file_name": file_name, "doc_type_id": document_type_id},
+            details=f"Request #{request_id}: uploaded {file_name}",
+        )
 
 
 def get_request_meta(session: Session, request_id: int) -> dict:
@@ -176,13 +196,15 @@ def get_customs_status(session: Session, request_id: int) -> list:
     """), {"req": request_id}).fetchall()
 
 
-def update_status(session: Session, table_name: str, record_id: int, status_id: int) -> None:
-    session.execute(
-        text(f"UPDATE {table_name} SET status_id = :st WHERE id = :rid"),
-        {"st": status_id, "rid": record_id}
-    )
-
-def upsert_status(session: Session, table_name: str, request_id: int, entity_name: str, status_id: int, terminal_name: Optional[str] = None) -> None:
+def upsert_status(
+    session: Session,
+    table_name: str,
+    request_id: int,
+    entity_name: str,
+    status_id: int,
+    terminal_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> None:
     valid_tables = {
         "shipping_line_registration": ("line_name", None),
         "port_registration": ("port_name", "terminal_name"),
@@ -200,13 +222,16 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         "status_id": status_id,
     }
 
+    old_status_id = None
+    record_id = None
+
     if terminal_field:
         terminal_clean = terminal_name.strip() if terminal_name else None
         params["terminal_name"] = terminal_clean
 
         existing = session.execute(
             text(f"""
-                SELECT id FROM {table_name}
+                SELECT id, status_id FROM {table_name}
                 WHERE request_id = :request_id
                 AND {name_field} = :name
                 AND (
@@ -219,9 +244,11 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         ).fetchone()
 
         if existing:
+            record_id = existing[0]
+            old_status_id = existing[1]
             session.execute(
                 text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
-                {"status_id": status_id, "id": existing[0]},
+                {"status_id": status_id, "id": record_id},
             )
         else:
             session.execute(
@@ -235,7 +262,7 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
     else:
         existing = session.execute(
             text(f"""
-                SELECT id FROM {table_name}
+                SELECT id, status_id FROM {table_name}
                 WHERE request_id = :request_id
                 AND {name_field} = :name
             """),
@@ -243,9 +270,11 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         ).fetchone()
 
         if existing:
+            record_id = existing[0]
+            old_status_id = existing[1]
             session.execute(
                 text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
-                {"status_id": status_id, "id": existing[0]},
+                {"status_id": status_id, "id": record_id},
             )
         else:
             session.execute(
@@ -256,9 +285,49 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
                 params
             )
 
+    # --- Audit: log status change if status actually changed ---
+    if user_email and old_status_id is not None and old_status_id != status_id:
+        entity_label = entity_name
+        if terminal_name:
+            entity_label = f"{entity_name} / {terminal_name}"
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="STATUS_CHANGE",
+            entity_type=table_name,
+            entity_id=record_id,
+            old_value={"status_id": old_status_id, "entity": entity_label},
+            new_value={"status_id": status_id, "entity": entity_label},
+            details=f"Request #{request_id}: {entity_label}",
+        )
+
+        # --- Notify the request owner about status change (A2) ---
+        request_owner = session.execute(
+            text("SELECT user_email, company_name FROM requests WHERE id = :rid"),
+            {"rid": request_id},
+        ).fetchone()
+        if request_owner and request_owner.user_email and request_owner.user_email != user_email:
+            # Resolve status names for the notification message
+            old_name = session.execute(
+                text("SELECT status FROM status WHERE id = :sid"),
+                {"sid": old_status_id},
+            ).scalar() or "sin estado"
+            new_name = session.execute(
+                text("SELECT status FROM status WHERE id = :sid"),
+                {"sid": status_id},
+            ).scalar() or "sin estado"
+
+            insert_notification(
+                session=session,
+                user_email=request_owner.user_email,
+                request_id=request_id,
+                message=f"{entity_label} cambio de '{old_name}' a '{new_name}' ({request_owner.company_name or 'solicitud'})",
+            )
+
 def batch_upsert_statuses(
     session: Session,
     updates: list[dict],
+    user_email: Optional[str] = None,
 ) -> None:
     """Batch upsert status updates in a single transaction.
 
@@ -277,6 +346,7 @@ def batch_upsert_statuses(
             entity_name=item["entity_name"],
             status_id=item["status_id"],
             terminal_name=item.get("terminal_name"),
+            user_email=item.get("user_email") or user_email,
         )
 
 
@@ -381,27 +451,44 @@ def get_requests_for_progress(
     only_for_email: Optional[str] = None,
     page: int = 0,
     page_size: int = 20,
+    search_term: Optional[str] = None,
 ) -> tuple[list[dict], int]:
-    """Return paginated requests and total count."""
-    count_sql = text("""
-        SELECT COUNT(*)
-        FROM requests
-        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
-    """)
-    total = session.execute(count_sql, {"email": only_for_email}).scalar()
-
-    sql = text("""
-        SELECT id, company_name, profile_id, created_at, user_email
-        FROM requests
-        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
-        ORDER BY created_at DESC
-        LIMIT :limit OFFSET :offset
-    """)
-    rows = session.execute(sql, {
+    """Return paginated requests and total count, with optional search."""
+    search_filter = ""
+    params: dict = {
         "email": only_for_email,
         "limit": page_size,
         "offset": page * page_size,
-    }).fetchall()
+    }
+
+    if search_term:
+        search_filter = """
+            AND (
+                LOWER(company_name) LIKE :search
+                OR CAST(id AS VARCHAR) LIKE :search_raw
+                OR LOWER(COALESCE(user_email, '')) LIKE :search
+            )
+        """
+        params["search"] = f"%{search_term.lower().strip()}%"
+        params["search_raw"] = f"%{search_term.strip()}%"
+
+    count_sql = text(f"""
+        SELECT COUNT(*)
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+        {search_filter}
+    """)
+    total = session.execute(count_sql, params).scalar()
+
+    sql = text(f"""
+        SELECT id, company_name, profile_id, created_at, user_email
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+        {search_filter}
+        ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    rows = session.execute(sql, params).fetchall()
 
     results = [
         {
@@ -414,3 +501,200 @@ def get_requests_for_progress(
         for r in rows
     ]
     return results, total
+
+
+# ==========================
+# COMMENT ENTRIES (threaded)
+# ==========================
+
+def insert_comment_entry(
+    session: Session,
+    request_id: int,
+    author_email: str,
+    author_name: str,
+    content: str,
+    entry_type: str = "comment",
+    image_drive_link: Optional[str] = None,
+    image_file_name: Optional[str] = None,
+) -> int:
+    """Insert a new comment entry and return its id."""
+    params = {
+        "request_id": request_id,
+        "author_email": author_email,
+        "author_name": author_name,
+        "content": content,
+        "entry_type": entry_type,
+        "image_drive_link": image_drive_link,
+        "image_file_name": image_file_name,
+    }
+
+    dialect = session.bind.dialect.name if session.bind else "unknown"
+
+    if dialect == "postgresql":
+        result = session.execute(
+            text("""
+                INSERT INTO comment_entries
+                    (request_id, author_email, author_name, content, entry_type,
+                     image_drive_link, image_file_name)
+                VALUES
+                    (:request_id, :author_email, :author_name, :content, :entry_type,
+                     :image_drive_link, :image_file_name)
+                RETURNING id
+            """),
+            params,
+        )
+        return result.scalar()
+    else:
+        # SQLite fallback
+        session.execute(
+            text("""
+                INSERT INTO comment_entries
+                    (request_id, author_email, author_name, content, entry_type,
+                     image_drive_link, image_file_name)
+                VALUES
+                    (:request_id, :author_email, :author_name, :content, :entry_type,
+                     :image_drive_link, :image_file_name)
+            """),
+            params,
+        )
+        row = session.execute(
+            text("SELECT id FROM comment_entries WHERE rowid = last_insert_rowid()")
+        ).fetchone()
+        return row[0] if row else None
+
+
+def get_comment_entries(session: Session, request_id: int) -> list[dict]:
+    """Return all comment entries for a request, newest first."""
+    rows = session.execute(
+        text("""
+            SELECT id, author_email, author_name, content, entry_type,
+                   image_drive_link, image_file_name, created_at
+            FROM comment_entries
+            WHERE request_id = :rid
+            ORDER BY created_at DESC
+        """),
+        {"rid": request_id},
+    ).fetchall()
+
+    return [
+        {
+            "id": r.id,
+            "author_email": r.author_email,
+            "author_name": r.author_name,
+            "content": r.content,
+            "entry_type": r.entry_type,
+            "image_drive_link": r.image_drive_link,
+            "image_file_name": r.image_file_name,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+# ==========================
+# NOTIFICATIONS
+# ==========================
+
+def insert_notification(
+    session: Session,
+    user_email: str,
+    request_id: int,
+    message: str,
+) -> None:
+    """Create an in-app notification for a user."""
+    session.execute(
+        text("""
+            INSERT INTO notifications (user_email, request_id, message)
+            VALUES (:user_email, :request_id, :message)
+        """),
+        {"user_email": user_email, "request_id": request_id, "message": message},
+    )
+
+
+def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
+    """Return unread notifications for a user."""
+    rows = session.execute(
+        text("""
+            SELECT n.id, n.request_id, n.message, n.created_at,
+                   r.company_name
+            FROM notifications n
+            LEFT JOIN requests r ON r.id = n.request_id
+            WHERE n.user_email = :email AND n.is_read = 0
+            ORDER BY n.created_at DESC
+        """),
+        {"email": user_email},
+    ).fetchall()
+
+    return [
+        {
+            "id": r.id,
+            "request_id": r.request_id,
+            "message": r.message,
+            "created_at": r.created_at,
+            "company_name": r.company_name,
+        }
+        for r in rows
+    ]
+
+
+def mark_notifications_read(session: Session, user_email: str) -> None:
+    """Mark all notifications as read for a user."""
+    session.execute(
+        text("UPDATE notifications SET is_read = 1 WHERE user_email = :email"),
+        {"email": user_email},
+    )
+
+
+# ==========================
+# AUDIT TIMELINE
+# ==========================
+
+def get_audit_timeline(session: Session, request_id: int, limit: int = 50) -> list[dict]:
+    """Return chronological audit entries for a request (newest first)."""
+    # Use exact delimiter "Request #N: " (with space after colon) to avoid
+    # matching Request #10 when searching for Request #1
+    rows = session.execute(
+        text("""
+            SELECT timestamp, user_email, action, entity_type,
+                   entity_id, old_value, new_value, details
+            FROM audit_log
+            WHERE entity_id = :rid
+               OR details LIKE :pattern
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """),
+        {"rid": request_id, "pattern": f"Request #{request_id}: %", "limit": limit}
+    ).fetchall()
+
+    return [
+        {
+            "timestamp": r.timestamp,
+            "user_email": r.user_email,
+            "action": r.action,
+            "entity_type": r.entity_type,
+            "old_value": r.old_value,
+            "new_value": r.new_value,
+            "details": r.details,
+        }
+        for r in rows
+    ]
+
+
+def get_last_status_change_time(session: Session, entity_type: str, entity_id: int) -> Optional[datetime]:
+    """Return the timestamp of the last STATUS_CHANGE for an entity.
+
+    Used for SLA tracking (C4) - how long an item has been in its current status.
+    """
+    row = session.execute(
+        text("""
+            SELECT timestamp
+            FROM audit_log
+            WHERE action = 'STATUS_CHANGE'
+              AND entity_type = :entity_type
+              AND entity_id = :entity_id
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """),
+        {"entity_type": entity_type, "entity_id": entity_id},
+    ).fetchone()
+    return row.timestamp if row else None

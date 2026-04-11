@@ -274,7 +274,54 @@ class InternalRegistration(Base):
 
 
 # ===================================================================
-# 11. audit_log
+# 11. comment_entries
+# ===================================================================
+
+class CommentEntry(Base):
+    __tablename__ = "comment_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("requests.id", ondelete="CASCADE"), nullable=False,
+    )
+    author_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    author_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    entry_type: Mapped[str] = mapped_column(String(50), default="comment")
+    image_drive_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    image_file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )
+
+    # Relationships
+    request: Mapped["Request"] = relationship()
+
+
+# ===================================================================
+# 12. notifications
+# ===================================================================
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("requests.id", ondelete="CASCADE"), nullable=True,
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )
+
+    # Relationships
+    request: Mapped[Optional["Request"]] = relationship()
+
+
+# ===================================================================
+# 13. audit_log
 # ===================================================================
 
 class AuditLog(Base):

@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 import streamlit as st
 from database.db import SessionLocal
@@ -8,34 +9,71 @@ from database.crud.documents import (
     get_ports_status,
     get_customs_status,
     get_comments_by_request,
+    get_comment_entries,
     get_razon_social_by_request,
     get_requests_for_progress,
+    get_audit_timeline,
+    get_last_status_change_time,
 )
 from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
 from utils.ui_helpers import status_badge
+from utils.timezone import to_colombia_tz
 from config.constants import DEFAULT_PAGE_SIZE
+
+
+def _sla_badge(last_change: Optional[datetime]) -> str:
+    """Return an HTML badge indicating time in current status."""
+    if not last_change:
+        return ""
+    # Handle both naive and aware datetimes safely
+    now = datetime.utcnow()
+    change_naive = last_change.replace(tzinfo=None) if hasattr(last_change, 'tzinfo') and last_change.tzinfo else last_change
+    delta = now - change_naive
+    days = delta.days
+    if days < 3:
+        color = "#10b981"  # green
+    elif days < 7:
+        color = "#f59e0b"  # amber
+    else:
+        color = "#ef4444"  # red
+
+    label = f"{days}d" if days > 0 else "hoy"
+    return f' <span style="background:{color};color:white;padding:1px 6px;border-radius:8px;font-size:11px;">{label}</span>'
 
 # ==========================
 #   VISTA DE PROGRESO
 # ==========================
 
 def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool = False):
-    st.subheader("📊 Visualización del Progreso de Solicitudes")
+    st.subheader("Visualizacion del Progreso de Solicitudes")
 
     session = SessionLocal()
 
     try:
         email_filter = None if is_admin else (current_user_email or None)
 
+        # --- Quick search (C2) ---
+        search_term = st.text_input(
+            "Buscar por empresa, ID o email",
+            placeholder="Escribe para filtrar...",
+            key="progress_search",
+        )
+
         page_key = "progress_page"
         if page_key not in st.session_state:
             st.session_state[page_key] = 0
+
+        # Reset to page 0 when search changes
+        if search_term != st.session_state.get("_last_search", ""):
+            st.session_state[page_key] = 0
+            st.session_state["_last_search"] = search_term
 
         requests, total_count = get_requests_for_progress(
             session,
             only_for_email=email_filter,
             page=st.session_state[page_key],
             page_size=DEFAULT_PAGE_SIZE,
+            search_term=search_term or None,
         )
         if not requests:
             st.info("No hay solicitudes para mostrar.")
@@ -117,14 +155,15 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
 
             lines = get_shipping_lines_status(session, request_id)
             if lines:
-                with st.expander("🚢 Líneas Navieras", expanded=True):
+                with st.expander("Lineas Navieras", expanded=True):
                     for line in lines:
                         sname = status_map.get(line.status_id, "Sin estado")
-                    st.markdown(f"- {line.line_name}: {status_badge(sname)}", unsafe_allow_html=True)
+                        sla = _sla_badge(get_last_status_change_time(session, "shipping_line_registration", line.id))
+                        st.markdown(f"- {line.line_name}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
             ports = get_ports_status(session, request_id)
             if ports:
-                with st.expander("⚓ Puertos y Terminales", expanded=True):
+                with st.expander("Puertos y Terminales", expanded=True):
                     grouped_ports = {}
                     for p in ports:
                         grouped_ports.setdefault(p.port_name, []).append(p)
@@ -134,25 +173,98 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
                         for term in terminals:
                             terminal_label = f" ({term.terminal_name})" if term.terminal_name else ""
                             sname = status_map.get(term.status_id, "Sin estado")
-                            st.markdown(f" - Terminal{terminal_label}: {status_badge(sname)}", unsafe_allow_html=True)
+                            sla = _sla_badge(get_last_status_change_time(session, "port_registration", term.id))
+                            st.markdown(f" - Terminal{terminal_label}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
-            # === Aduanas
             customs = get_customs_status(session, request_id)
             if customs:
-                with st.expander("🧾 Aduanas", expanded=True):
+                with st.expander("Aduanas", expanded=True):
                     for c in customs:
                         sname = status_map.get(c.status_id, "Sin estado")
-                    st.markdown(f"- {c.customs_name}: {status_badge(sname)}", unsafe_allow_html=True)
+                        sla = _sla_badge(get_last_status_change_time(session, "customs_registration", c.id))
+                        st.markdown(f"- {c.customs_name}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
 
-            comments_data = get_comments_by_request(session, request_id)
-            st.markdown("#### 🗒️ Comentarios y Seguimiento")
-            if comments_data:
-                st.write("**Comentarios:**")
-                st.write(f"{comments_data['comments'] or '—'}")
-                st.write("**Seguimiento / Notificaciones:**")
-                st.write(f"{comments_data['notifications'] or '—'}")
-            else:
-                st.caption("Sin comentarios registrados para esta solicitud.")
+            # === Progress bar (A3) ===
+            total_items = 0
+            approved_items = 0
+            approved_status_id = None
+            # status_map is {id: name} from status_id_to_name_map()
+            for s_id, s_name in status_map.items():
+                if isinstance(s_name, str) and "aprobado" in s_name.lower():
+                    approved_status_id = s_id
+                    break
+
+            if lines:
+                total_items += len(lines)
+                approved_items += sum(1 for ln in lines if ln.status_id == approved_status_id)
+            if ports:
+                total_items += len(ports)
+                approved_items += sum(1 for p in ports if p.status_id == approved_status_id)
+            if customs:
+                total_items += len(customs)
+                approved_items += sum(1 for c in customs if c.status_id == approved_status_id)
+            if approved_status_id is not None and internal_status_id == approved_status_id:
+                approved_items += 1
+            total_items += 1  # internal always counts
+
+            if total_items > 0:
+                pct = approved_items / total_items
+                st.markdown(f"**Progreso general:** {approved_items}/{total_items} aprobados")
+                st.progress(pct)
+
+            # === Threaded comments (B1) ===
+            comment_entries = get_comment_entries(session, request_id)
+            with st.expander("Comentarios y Seguimiento", expanded=bool(comment_entries)):
+                if comment_entries:
+                    for entry in comment_entries:
+                        created = entry["created_at"]
+                        date_str = (
+                            to_colombia_tz(created).strftime("%Y-%m-%d %H:%M")
+                            if created else "sin fecha"
+                        )
+                        author = entry["author_name"] or entry["author_email"]
+                        entry_type = entry["entry_type"]
+                        type_tag = {"rechazo": " [RECHAZO]", "nota": " [NOTA]"}.get(entry_type, "")
+
+                        st.markdown(f"**{author}**{type_tag} - _{date_str}_")
+                        st.markdown(f"> {entry['content']}")
+
+                        if entry.get("image_drive_link"):
+                            st.markdown(f"[{entry.get('image_file_name', 'imagen')}]({entry['image_drive_link']})")
+
+                        st.markdown("---")
+                else:
+                    # Fall back to legacy comments
+                    comments_data = get_comments_by_request(session, request_id)
+                    if comments_data:
+                        st.write("**Comentarios:**")
+                        st.write(f"{comments_data['comments'] or '—'}")
+                        st.write("**Seguimiento / Notificaciones:**")
+                        st.write(f"{comments_data['notifications'] or '—'}")
+                    else:
+                        st.caption("Sin comentarios registrados.")
+
+            # === Activity timeline (A1) ===
+            timeline = get_audit_timeline(session, request_id)
+            if timeline:
+                with st.expander("Historial de actividad", expanded=False):
+                    for event in timeline:
+                        ts = event["timestamp"]
+                        ts_str = (
+                            to_colombia_tz(ts).strftime("%Y-%m-%d %H:%M")
+                            if ts else "—"
+                        )
+                        action_icons = {
+                            "CREATE": "🆕",
+                            "UPLOAD": "📎",
+                            "STATUS_CHANGE": "🔄",
+                            "UPDATE": "✏️",
+                        }
+                        icon = action_icons.get(event["action"], "•")
+                        user = event["user_email"].split("@")[0] if event["user_email"] else "—"
+                        detail = event["details"] or event["action"]
+
+                        st.markdown(f"{icon} **{ts_str}** - {user} - {detail}")
 
         # --- Pagination controls ---
         total_pages = max(1, (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE)

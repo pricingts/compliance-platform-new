@@ -112,6 +112,27 @@ CREATE TABLE IF NOT EXISTS internal_registration (
     status_id INTEGER REFERENCES status(id)
 );
 
+CREATE TABLE IF NOT EXISTS comment_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES requests(id),
+    author_email VARCHAR(255) NOT NULL,
+    author_name VARCHAR(255),
+    content TEXT NOT NULL,
+    entry_type VARCHAR(50) DEFAULT 'comment',
+    image_drive_link TEXT,
+    image_file_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email VARCHAR(255) NOT NULL,
+    request_id INTEGER REFERENCES requests(id),
+    message TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

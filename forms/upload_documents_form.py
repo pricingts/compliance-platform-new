@@ -21,11 +21,14 @@ from database.crud.documents import (
     upsert_status,
     upsert_request_info,
     update_request_meta,
+    insert_comment_entry,
+    get_comment_entries,
 )
 from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
 from utils.ui_helpers import render_section_header
 from utils.error_handlers import handle_error
+from services.audit import log_action
 from services.logging_config import get_logger
 
 # Google Drive utils
@@ -250,7 +253,7 @@ def _render_internal_docs(session, profile_id, request_id, status_map, status_la
 
             uploaded_buffers[f"internal_{key_suffix}"] = st.file_uploader(
                 label="Subir archivo",
-                type=["pdf"],
+                type=["pdf", "jpg", "jpeg", "png"],
                 key=f"uploader_internal_{key_suffix}_{request_id}",
                 accept_multiple_files=True
             )
@@ -305,7 +308,7 @@ def _render_required_docs(session, profile_id, request_id, status_map, status_la
         # ---- uploader unico ----
         uploaded_buffers[doc_id] = st.file_uploader(
             label="Subir documento",
-            type=["pdf"],
+            type=["pdf", "jpg", "jpeg", "png"],
             key=f"uploader_{request_id}_{doc_id}",
             accept_multiple_files=True
         )
@@ -386,27 +389,104 @@ def _render_required_docs(session, profile_id, request_id, status_map, status_la
 
 
 def _render_followup_section(request_id, session):
-    """Render comments and notifications text areas.
+    """Render threaded comment history + new comment input.
 
-    Returns (notifications, comments).
+    Returns (notifications, comments) for backward-compat with legacy
+    comments table, plus handles new comment_entries insertion.
     """
     st.subheader("Seguimiento y comentarios")
 
+    # --- Display existing threaded comments ---
+    entries = get_comment_entries(session, request_id)
+    if entries:
+        for entry in entries:
+            created = entry["created_at"]
+            date_str = (
+                to_colombia_tz(created).strftime("%Y-%m-%d %H:%M")
+                if created else "sin fecha"
+            )
+            author = entry["author_name"] or entry["author_email"]
+            entry_type = entry["entry_type"]
+
+            type_icon = {"comment": "", "rechazo": " [RECHAZO]", "nota": " [NOTA]"}.get(entry_type, "")
+
+            st.markdown(
+                f"**{author}**{type_icon} - _{date_str}_\n\n"
+                f"> {entry['content']}"
+            )
+
+            # Show image thumbnail if present
+            if entry.get("image_drive_link"):
+                img_name = entry.get("image_file_name", "imagen")
+                st.markdown(f"[{img_name}]({entry['image_drive_link']})")
+
+            st.markdown("---")
+    else:
+        st.caption("Sin comentarios registrados.")
+
+    # --- Rejection reason (B5) ---
+    # Check if any status selectbox is set to a "rechazado" value
+    has_rejection = False
+    for key, value in st.session_state.items():
+        if key.startswith(("status_line_", "status_port_", "status_customs_", "status_internal_")):
+            if isinstance(value, str) and "rechazado" in value.lower():
+                has_rejection = True
+                break
+
+    if has_rejection:
+        st.warning("Has marcado uno o mas items como **rechazado**. Indica el motivo:")
+        st.text_area(
+            "Motivo del rechazo",
+            height=80,
+            key=f"_rejection_reason_{request_id}",
+            placeholder="Describe el motivo del rechazo para que el comercial lo vea..."
+        )
+
+    # --- New comment input ---
+    st.markdown("**Agregar comentario:**")
+    new_comment = st.text_area(
+        "Escribe un comentario",
+        height=100,
+        key=f"new_comment_{request_id}",
+        placeholder="Escribe un comentario o nota de seguimiento..."
+    )
+
+    comment_type = st.selectbox(
+        "Tipo",
+        ["comment", "nota"],
+        format_func=lambda x: {"comment": "Comentario", "nota": "Nota de seguimiento"}.get(x, x),
+        key=f"comment_type_{request_id}",
+    )
+
+    comment_image = st.file_uploader(
+        "Adjuntar imagen (opcional)",
+        type=["jpg", "jpeg", "png"],
+        key=f"comment_image_{request_id}",
+    )
+
+    # Store new comment data in session_state for processing in _save_all_data
+    st.session_state[f"_pending_comment_{request_id}"] = {
+        "text": new_comment,
+        "type": comment_type,
+        "image": comment_image,
+    }
+
+    # --- Legacy follow-up fields (backward compat) ---
     meta = get_request_meta(session, request_id) or {}
     notif_default = (meta.get("notification_followup") or "").strip()
     comments_default = (meta.get("general_comments") or "").strip()
 
-    seguimiento_text = st.text_area(
-        "Seguimiento de notificación",
-        value=notif_default,
-        height=150
-    )
-
-    comentarios_text = st.text_area(
-        "Comentarios generales",
-        value=comments_default,
-        height=150
-    )
+    with st.expander("Campos legacy (seguimiento / notificaciones)", expanded=False):
+        seguimiento_text = st.text_area(
+            "Seguimiento de notificacion",
+            value=notif_default,
+            height=100
+        )
+        comentarios_text = st.text_area(
+            "Comentarios generales (legacy)",
+            value=comments_default,
+            height=100
+        )
 
     return (seguimiento_text, comentarios_text)
 
@@ -476,6 +556,8 @@ def _save_all_data(
     lines, ports, customs, uploaded_by
 ):
     """DB persistence: upsert docs + statuses + meta."""
+    user_email = getattr(st.user, "email", None) if hasattr(st, "user") else None
+
     for doc_type_id, safe_name, drive_link in uploaded_results:
         upsert_uploaded_document(
             session,
@@ -485,7 +567,8 @@ def _save_all_data(
             drive_link,
             uploaded_by,
             razon_social,
-            fecha_creacion
+            fecha_creacion,
+            user_email=user_email,
         )
 
     razon_social_val = st.session_state.get(f"razon_social_{request_id}", "").strip()
@@ -498,8 +581,11 @@ def _save_all_data(
         fecha_creacion_val
     )
 
+    # === Detect rejection reason (B5) ===
+    rejection_reason = st.session_state.get(f"_rejection_reason_{request_id}", "").strip()
+
     # === Guardar estatus de Registro Interno ===
-    upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label])
+    upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label], user_email=user_email)
 
     # === Guardar estados asociados ===
     for key, value in st.session_state.items():
@@ -512,7 +598,8 @@ def _save_all_data(
                     "shipping_line_registration",
                     request_id,
                     line_data.line_name,
-                    status_map[value]
+                    status_map[value],
+                    user_email=user_email,
                 )
 
         elif key.startswith("status_port_"):
@@ -525,15 +612,96 @@ def _save_all_data(
                     request_id,
                     port_data.port_name,
                     status_map[value],
-                    port_data.terminal_name
+                    port_data.terminal_name,
+                    user_email=user_email,
                 )
 
         elif key.startswith("status_customs_"):
             name = key.replace("status_customs_", "")
-            upsert_status(session, "customs_registration", request_id, name, status_map[value])
+            upsert_status(session, "customs_registration", request_id, name, status_map[value], user_email=user_email)
 
-    # === Guardar comentarios ===
+    # === Save rejection reason as comment entry (B5) ===
+    if rejection_reason and user_email:
+        insert_comment_entry(
+            session=session,
+            request_id=request_id,
+            author_email=user_email,
+            author_name=uploaded_by,
+            content=rejection_reason,
+            entry_type="rechazo",
+        )
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="CREATE",
+            entity_type="comment_entry",
+            entity_id=request_id,
+            new_value={"content": rejection_reason[:200], "type": "rechazo"},
+            details=f"Request #{request_id}: rejection reason recorded",
+        )
+
+    # === Guardar comentarios legacy ===
     update_request_meta(session, request_id, notifications, comments)
+
+    # === Guardar nuevo comentario (threaded) ===
+    pending = st.session_state.get(f"_pending_comment_{request_id}", {})
+    comment_text = (pending.get("text") or "").strip()
+    if comment_text and user_email:
+        image_link = None
+        image_name = None
+
+        # Upload comment image to Drive if present
+        comment_image = pending.get("image")
+        if comment_image:
+            try:
+                service = init_drive()
+                CLIENTS_FOLDER_ID = st.secrets["drive"].get("clients_folder_id")
+                safe_img_name = sanitize_filename(comment_image.name)
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_img_name}") as tmp:
+                        tmp_path = tmp.name
+                        tmp.write(comment_image.getbuffer())
+                    image_link = upload_to_drive(service, CLIENTS_FOLDER_ID, tmp_path, safe_img_name)
+                    image_name = safe_img_name
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to upload comment image: {e}")
+
+        insert_comment_entry(
+            session=session,
+            request_id=request_id,
+            author_email=user_email,
+            author_name=uploaded_by,
+            content=comment_text,
+            entry_type=pending.get("type", "comment"),
+            image_drive_link=image_link,
+            image_file_name=image_name,
+        )
+
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="CREATE",
+            entity_type="comment_entry",
+            entity_id=request_id,
+            new_value={"content": comment_text[:200], "type": pending.get("type", "comment")},
+            details=f"Request #{request_id}: new comment",
+        )
+
+    # Audit: log legacy comment update
+    if user_email and (notifications or comments):
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="UPDATE",
+            entity_type="comments",
+            entity_id=request_id,
+            new_value={"notifications": notifications or "", "comments": comments or ""},
+            details=f"Request #{request_id}: updated comments/notifications",
+        )
 
     try:
         session.commit()
@@ -629,8 +797,12 @@ def forms():
                         seguimiento_text, comentarios_text,
                         internal_status_label, status_map,
                         lines, ports, customs,
-                        st.user.name
+                        getattr(st.user, "name", "dev-user") if hasattr(st, "user") else "dev-user"
                     )
+
+                # Clear pending comment to avoid duplicate on re-submit
+                st.session_state.pop(f"_pending_comment_{request_id}", None)
+                st.session_state.pop(f"_rejection_reason_{request_id}", None)
 
                 st.success(f"Cambios guardados correctamente. {changes} documento(s) nuevo(s) agregado(s).")
 

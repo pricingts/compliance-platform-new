@@ -122,7 +122,34 @@ CREATE TABLE internal_registration (
 );
 
 -- =====================
--- 11. Tabla audit_log
+-- 11. Tabla comment_entries (comentarios con atribucion)
+-- =====================
+CREATE TABLE comment_entries (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    author_email VARCHAR(255) NOT NULL,
+    author_name VARCHAR(255),
+    content TEXT NOT NULL,
+    entry_type VARCHAR(50) DEFAULT 'comment',
+    image_drive_link TEXT,
+    image_file_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================
+-- 12. Tabla notifications (notificaciones in-app)
+-- =====================
+CREATE TABLE notifications (
+    id SERIAL PRIMARY KEY,
+    user_email VARCHAR(255) NOT NULL,
+    request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================
+-- 13. Tabla audit_log
 -- =====================
 CREATE TABLE audit_log (
     id SERIAL PRIMARY KEY,
@@ -147,6 +174,10 @@ CREATE INDEX IF NOT EXISTS idx_customs_registration_request_id ON customs_regist
 CREATE INDEX IF NOT EXISTS idx_port_registration_request_id ON port_registration(request_id);
 CREATE INDEX IF NOT EXISTS idx_shipping_line_registration_request_id ON shipping_line_registration(request_id);
 CREATE INDEX IF NOT EXISTS idx_internal_registration_request_id ON internal_registration(request_id);
+CREATE INDEX IF NOT EXISTS idx_comment_entries_request_id ON comment_entries(request_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_email ON notifications(user_email);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity_id ON audit_log(entity_id);
 
 -- =========================================================
 -- 🔗 Relaciones y Consideraciones
