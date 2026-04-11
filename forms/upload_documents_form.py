@@ -424,6 +424,24 @@ def _render_followup_section(request_id, session):
     else:
         st.caption("Sin comentarios registrados.")
 
+    # --- Rejection reason (B5) ---
+    # Check if any status selectbox is set to a "rechazado" value
+    has_rejection = False
+    for key, value in st.session_state.items():
+        if key.startswith(("status_line_", "status_port_", "status_customs_", "status_internal_")):
+            if isinstance(value, str) and "rechazado" in value.lower():
+                has_rejection = True
+                break
+
+    if has_rejection:
+        st.warning("Has marcado uno o mas items como **rechazado**. Indica el motivo:")
+        st.text_area(
+            "Motivo del rechazo",
+            height=80,
+            key=f"_rejection_reason_{request_id}",
+            placeholder="Describe el motivo del rechazo para que el comercial lo vea..."
+        )
+
     # --- New comment input ---
     st.markdown("**Agregar comentario:**")
     new_comment = st.text_area(
@@ -563,6 +581,9 @@ def _save_all_data(
         fecha_creacion_val
     )
 
+    # === Detect rejection reason (B5) ===
+    rejection_reason = st.session_state.get(f"_rejection_reason_{request_id}", "").strip()
+
     # === Guardar estatus de Registro Interno ===
     upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label], user_email=user_email)
 
@@ -598,6 +619,26 @@ def _save_all_data(
         elif key.startswith("status_customs_"):
             name = key.replace("status_customs_", "")
             upsert_status(session, "customs_registration", request_id, name, status_map[value], user_email=user_email)
+
+    # === Save rejection reason as comment entry (B5) ===
+    if rejection_reason and user_email:
+        insert_comment_entry(
+            session=session,
+            request_id=request_id,
+            author_email=user_email,
+            author_name=uploaded_by,
+            content=rejection_reason,
+            entry_type="rechazo",
+        )
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="CREATE",
+            entity_type="comment_entry",
+            entity_id=request_id,
+            new_value={"content": rejection_reason[:200], "type": "rechazo"},
+            details=f"Request #{request_id}: rejection reason recorded",
+        )
 
     # === Guardar comentarios legacy ===
     update_request_meta(session, request_id, notifications, comments)

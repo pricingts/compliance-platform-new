@@ -39,6 +39,7 @@ st.session_state["_is_admin"] = is_admin
 
 # --- Navigation (only rendered when authenticated) ---
 pages_compliance = [
+    st.Page("views/dashboard.py", title="Dashboard", icon=":material/dashboard:"),
     st.Page("views/request.py", title="Solicitud de Creacion", icon=":material/edit_note:"),
     st.Page("views/upload_documents.py", title="Registro de Documentos", icon=":material/upload_file:"),
     st.Page("views/progress.py", title="Progreso", icon=":material/monitoring:"),
