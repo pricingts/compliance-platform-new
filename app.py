@@ -51,8 +51,8 @@ pages_other = [
 
 pages = pages_compliance if is_admin else pages_other
 
-# --- Sidebar brand in header (above nav) ---
-st.logo("images/logo_trading.png")
+# --- Brand above nav (st.logo is the only way to render above st.navigation) ---
+st.logo("assets/brand_sidebar.svg", icon_image="assets/brand_sidebar_small.svg")
 
 pg = st.navigation(pages)
 

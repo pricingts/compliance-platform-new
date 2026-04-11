@@ -23,7 +23,7 @@
     background-color: var(--primary-dark) !important;
 }
 
-/* Sidebar layout: flex column for ordering */
+/* Sidebar layout */
 [data-testid="stSidebarContent"] {
     display: flex !important;
     flex-direction: column !important;
@@ -32,14 +32,21 @@
     padding-bottom: 0 !important;
 }
 
-/* User content fills remaining space, internal flex for brand top / user bottom */
+/* Sidebar header (brand logo area) */
+[data-testid="stSidebarHeader"] {
+    border-bottom: 1px solid #334155 !important;
+    padding: 12px 16px 12px 16px !important;
+}
+
+/* User content fills remaining space */
 [data-testid="stSidebarUserContent"] {
     display: flex !important;
     flex-direction: column !important;
     flex: 1 !important;
+    min-height: 0 !important;
 }
 
-/* Push user block + button to bottom */
+/* Push user block to bottom */
 [data-testid="stSidebarUserContent"] > div:has(.sidebar-user) {
     margin-top: auto !important;
 }
@@ -71,17 +78,7 @@
     margin: 8px 0 !important;
 }
 
-/* --- Sidebar Header (st.logo area — above nav) --- */
-[data-testid="stSidebarHeader"] {
-    border-bottom: 1px solid #334155 !important;
-    padding: 12px 16px !important;
-}
-
-[data-testid="stSidebarHeader"] img {
-    max-height: 40px !important;
-}
-
-/* --- Sidebar Brand (fallback when no st.logo) --- */
+/* --- Sidebar Brand --- */
 .sidebar-brand {
     display: flex;
     align-items: center;
