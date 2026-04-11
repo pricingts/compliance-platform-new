@@ -8,6 +8,7 @@ from database.crud.clientes import (
     get_profile_id,
 )
 from services.sheets_writer import save_request
+from services.audit import log_action
 from services.logging_config import get_logger
 from utils.error_handlers import handle_error
 from utils.ui_helpers import render_section_header
@@ -309,6 +310,25 @@ def _save_request_to_db(
                 insert_shipping_line_registration(
                     session, request_id, line_data
                 )
+
+            # Audit: log request creation
+            log_action(
+                session=session,
+                user_email=user_email or "unknown",
+                action="CREATE",
+                entity_type="request",
+                entity_id=request_id,
+                new_value={
+                    "company_name": company_name,
+                    "tipo_solicitud": "cliente" if operation_type else "proveedor",
+                    "trading": trading,
+                    "has_customs": has_customs,
+                    "has_port": has_port,
+                    "has_shipping_line": has_shipping_line,
+                },
+                details=f"Request #{request_id}: {company_name}",
+            )
+            session.commit()
 
             return request_id
         except Exception as e:

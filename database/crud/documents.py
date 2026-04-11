@@ -6,6 +6,8 @@ from sqlalchemy import text
 from datetime import datetime
 from typing import Optional
 
+from services.audit import log_action
+
 # ==========================
 # 🔹 EMPRESAS Y PERFILES
 # ==========================
@@ -86,10 +88,17 @@ def get_uploaded_documents_map(session: Session, request_id: int) -> dict[int, l
     return grouped
 
 
-def upsert_uploaded_document(session: Session, request_id: int, document_type_id: int,
-                             file_name: str, drive_link: str, uploaded_by: str,
-                            razon_social: Optional[str] = None,
-                            fecha_creacion: Optional[datetime] = None) -> None:
+def upsert_uploaded_document(
+    session: Session,
+    request_id: int,
+    document_type_id: int,
+    file_name: str,
+    drive_link: str,
+    uploaded_by: str,
+    razon_social: Optional[str] = None,
+    fecha_creacion: Optional[datetime] = None,
+    user_email: Optional[str] = None,
+) -> None:
     session.execute(
         text("""
             INSERT INTO registration (request_id, doc_type_id, file_name, drive_link, uploaded_by, razon_social, fecha_creacion)
@@ -105,6 +114,17 @@ def upsert_uploaded_document(session: Session, request_id: int, document_type_id
             "fecha_creacion": fecha_creacion
         }
     )
+
+    if user_email:
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="UPLOAD",
+            entity_type="registration",
+            entity_id=request_id,
+            new_value={"file_name": file_name, "doc_type_id": document_type_id},
+            details=f"Request #{request_id}: uploaded {file_name}",
+        )
 
 
 def get_request_meta(session: Session, request_id: int) -> dict:
@@ -182,7 +202,15 @@ def update_status(session: Session, table_name: str, record_id: int, status_id: 
         {"st": status_id, "rid": record_id}
     )
 
-def upsert_status(session: Session, table_name: str, request_id: int, entity_name: str, status_id: int, terminal_name: Optional[str] = None) -> None:
+def upsert_status(
+    session: Session,
+    table_name: str,
+    request_id: int,
+    entity_name: str,
+    status_id: int,
+    terminal_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> None:
     valid_tables = {
         "shipping_line_registration": ("line_name", None),
         "port_registration": ("port_name", "terminal_name"),
@@ -200,13 +228,16 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         "status_id": status_id,
     }
 
+    old_status_id = None
+    record_id = None
+
     if terminal_field:
         terminal_clean = terminal_name.strip() if terminal_name else None
         params["terminal_name"] = terminal_clean
 
         existing = session.execute(
             text(f"""
-                SELECT id FROM {table_name}
+                SELECT id, status_id FROM {table_name}
                 WHERE request_id = :request_id
                 AND {name_field} = :name
                 AND (
@@ -219,9 +250,11 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         ).fetchone()
 
         if existing:
+            record_id = existing[0]
+            old_status_id = existing[1]
             session.execute(
                 text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
-                {"status_id": status_id, "id": existing[0]},
+                {"status_id": status_id, "id": record_id},
             )
         else:
             session.execute(
@@ -235,7 +268,7 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
     else:
         existing = session.execute(
             text(f"""
-                SELECT id FROM {table_name}
+                SELECT id, status_id FROM {table_name}
                 WHERE request_id = :request_id
                 AND {name_field} = :name
             """),
@@ -243,9 +276,11 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
         ).fetchone()
 
         if existing:
+            record_id = existing[0]
+            old_status_id = existing[1]
             session.execute(
                 text(f"UPDATE {table_name} SET status_id = :status_id WHERE id = :id"),
-                {"status_id": status_id, "id": existing[0]},
+                {"status_id": status_id, "id": record_id},
             )
         else:
             session.execute(
@@ -255,6 +290,22 @@ def upsert_status(session: Session, table_name: str, request_id: int, entity_nam
                 """),
                 params
             )
+
+    # --- Audit: log status change if status actually changed ---
+    if user_email and old_status_id is not None and old_status_id != status_id:
+        entity_label = entity_name
+        if terminal_name:
+            entity_label = f"{entity_name} / {terminal_name}"
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="STATUS_CHANGE",
+            entity_type=table_name,
+            entity_id=record_id,
+            old_value={"status_id": old_status_id, "entity": entity_label},
+            new_value={"status_id": status_id, "entity": entity_label},
+            details=f"Request #{request_id}: {entity_label}",
+        )
 
 def batch_upsert_statuses(
     session: Session,
@@ -414,3 +465,36 @@ def get_requests_for_progress(
         for r in rows
     ]
     return results, total
+
+
+# ==========================
+# AUDIT TIMELINE
+# ==========================
+
+def get_audit_timeline(session: Session, request_id: int, limit: int = 50) -> list[dict]:
+    """Return chronological audit entries for a request (newest first)."""
+    rows = session.execute(
+        text("""
+            SELECT timestamp, user_email, action, entity_type,
+                   entity_id, old_value, new_value, details
+            FROM audit_log
+            WHERE entity_id = :rid
+               OR details LIKE :pattern
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """),
+        {"rid": request_id, "pattern": f"Request #{request_id}:%", "limit": limit}
+    ).fetchall()
+
+    return [
+        {
+            "timestamp": r.timestamp,
+            "user_email": r.user_email,
+            "action": r.action,
+            "entity_type": r.entity_type,
+            "old_value": r.old_value,
+            "new_value": r.new_value,
+            "details": r.details,
+        }
+        for r in rows
+    ]

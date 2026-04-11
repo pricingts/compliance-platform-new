@@ -26,6 +26,7 @@ from utils.form_helpers import cached_company_names, cached_profiles_list, cache
 from utils.timezone import to_colombia_tz
 from utils.ui_helpers import render_section_header
 from utils.error_handlers import handle_error
+from services.audit import log_action
 from services.logging_config import get_logger
 
 # Google Drive utils
@@ -476,6 +477,8 @@ def _save_all_data(
     lines, ports, customs, uploaded_by
 ):
     """DB persistence: upsert docs + statuses + meta."""
+    user_email = getattr(st.user, "email", None) if hasattr(st, "user") else None
+
     for doc_type_id, safe_name, drive_link in uploaded_results:
         upsert_uploaded_document(
             session,
@@ -485,7 +488,8 @@ def _save_all_data(
             drive_link,
             uploaded_by,
             razon_social,
-            fecha_creacion
+            fecha_creacion,
+            user_email=user_email,
         )
 
     razon_social_val = st.session_state.get(f"razon_social_{request_id}", "").strip()
@@ -499,7 +503,7 @@ def _save_all_data(
     )
 
     # === Guardar estatus de Registro Interno ===
-    upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label])
+    upsert_status(session, "internal_registration", request_id, "Registro interno", status_map[internal_status_label], user_email=user_email)
 
     # === Guardar estados asociados ===
     for key, value in st.session_state.items():
@@ -512,7 +516,8 @@ def _save_all_data(
                     "shipping_line_registration",
                     request_id,
                     line_data.line_name,
-                    status_map[value]
+                    status_map[value],
+                    user_email=user_email,
                 )
 
         elif key.startswith("status_port_"):
@@ -525,15 +530,28 @@ def _save_all_data(
                     request_id,
                     port_data.port_name,
                     status_map[value],
-                    port_data.terminal_name
+                    port_data.terminal_name,
+                    user_email=user_email,
                 )
 
         elif key.startswith("status_customs_"):
             name = key.replace("status_customs_", "")
-            upsert_status(session, "customs_registration", request_id, name, status_map[value])
+            upsert_status(session, "customs_registration", request_id, name, status_map[value], user_email=user_email)
 
     # === Guardar comentarios ===
     update_request_meta(session, request_id, notifications, comments)
+
+    # Audit: log comment update
+    if user_email and (notifications or comments):
+        log_action(
+            session=session,
+            user_email=user_email,
+            action="UPDATE",
+            entity_type="comments",
+            entity_id=request_id,
+            new_value={"notifications": notifications or "", "comments": comments or ""},
+            details=f"Request #{request_id}: updated comments/notifications",
+        )
 
     try:
         session.commit()
