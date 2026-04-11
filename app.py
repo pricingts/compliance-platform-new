@@ -4,7 +4,7 @@ from typing import Optional
 import streamlit as st
 from services.authentication import check_authentication
 from config.settings import get_admin_emails
-from utils.ui_helpers import load_css, render_sidebar_brand, render_sidebar_user
+from utils.ui_helpers import load_css, render_sidebar_user
 
 st.set_page_config(page_title="Compliance Platform", layout="wide")
 load_css()

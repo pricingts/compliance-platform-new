@@ -38,9 +38,14 @@
     padding: 16px 16px 14px 16px !important;
 }
 
-[data-testid="stSidebarHeader"] img {
-    max-height: 64px !important;
+/* Override Streamlit's restrictive logo sizing */
+[data-testid="stSidebarHeader"] img,
+[data-testid="stLogo"] {
+    height: 3.5rem !important;
+    max-height: 3.5rem !important;
+    max-width: calc(100% - 1rem) !important;
     width: auto !important;
+    object-fit: contain !important;
 }
 
 /* User content fills remaining space */
