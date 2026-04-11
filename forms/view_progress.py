@@ -25,7 +25,10 @@ def _sla_badge(last_change: Optional[datetime]) -> str:
     """Return an HTML badge indicating time in current status."""
     if not last_change:
         return ""
-    delta = datetime.utcnow() - last_change
+    # Handle both naive and aware datetimes safely
+    now = datetime.utcnow()
+    change_naive = last_change.replace(tzinfo=None) if hasattr(last_change, 'tzinfo') and last_change.tzinfo else last_change
+    delta = now - change_naive
     days = delta.days
     if days < 3:
         color = "#10b981"  # green
@@ -60,26 +63,21 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
         if page_key not in st.session_state:
             st.session_state[page_key] = 0
 
+        # Reset to page 0 when search changes
+        if search_term != st.session_state.get("_last_search", ""):
+            st.session_state[page_key] = 0
+            st.session_state["_last_search"] = search_term
+
         requests, total_count = get_requests_for_progress(
             session,
             only_for_email=email_filter,
             page=st.session_state[page_key],
             page_size=DEFAULT_PAGE_SIZE,
+            search_term=search_term or None,
         )
         if not requests:
             st.info("No hay solicitudes para mostrar.")
             return
-
-        # Apply search filter
-        if search_term:
-            term = search_term.lower().strip()
-            requests = [
-                r for r in requests
-                if term in (r.get("company_name") or "").lower()
-                or term in str(r.get("id", ""))
-                or term in (r.get("user_email") or "").lower()
-            ]
-            total_count = len(requests)
 
         companies = sorted({r.get("company_name") for r in requests if r.get("company_name")})
 
@@ -205,7 +203,7 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
             if customs:
                 total_items += len(customs)
                 approved_items += sum(1 for c in customs if c.status_id == approved_status_id)
-            if internal_status_id == approved_status_id:
+            if approved_status_id is not None and internal_status_id == approved_status_id:
                 approved_items += 1
             total_items += 1  # internal always counts
 

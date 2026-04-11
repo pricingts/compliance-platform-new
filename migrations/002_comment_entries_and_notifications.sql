@@ -25,8 +25,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes
+-- Indexes for new tables
 CREATE INDEX IF NOT EXISTS idx_comment_entries_request_id ON comment_entries(request_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_email ON notifications(user_email);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+
+-- Indexes for audit_log performance
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity_id ON audit_log(entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp DESC);
+
+-- Fix: internal_registration.status_id missing ON DELETE SET NULL
+-- (cannot ALTER FK in PostgreSQL, but new deployments will use init_db.sql)

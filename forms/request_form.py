@@ -289,7 +289,7 @@ def _save_request_to_db(
                 has_shipping_line=linea_naviera,
                 requested_by=requested_by,
                 requested_by_type=requested_by_type,
-                user_email=st.user.email,
+                user_email=st.session_state.get("_user_email", "unknown"),
             )
 
             if aduana and tipo_aduana:
@@ -312,23 +312,27 @@ def _save_request_to_db(
                 )
 
             # Audit: log request creation
-            log_action(
-                session=session,
-                user_email=user_email or "unknown",
-                action="CREATE",
-                entity_type="request",
-                entity_id=request_id,
-                new_value={
-                    "company_name": company_name,
-                    "tipo_solicitud": "cliente" if operation_type else "proveedor",
-                    "trading": trading,
-                    "has_customs": has_customs,
-                    "has_port": has_port,
-                    "has_shipping_line": has_shipping_line,
-                },
-                details=f"Request #{request_id}: {company_name}",
-            )
-            session.commit()
+            _audit_email = getattr(st.user, "email", "unknown") if hasattr(st, "user") else "unknown"
+            try:
+                log_action(
+                    session=session,
+                    user_email=_audit_email,
+                    action="CREATE",
+                    entity_type="request",
+                    entity_id=request_id,
+                    new_value={
+                        "company_name": company_name,
+                        "tipo_solicitud": tipo_solicitud,
+                        "trading": trading,
+                        "has_customs": aduana,
+                        "has_port": puerto,
+                        "has_shipping_line": linea_naviera,
+                    },
+                    details=f"Request #{request_id}: {company_name}",
+                )
+                session.commit()
+            except Exception:
+                logger.warning("Audit log failed for request creation", exc_info=True)
 
             return request_id
         except Exception as e:

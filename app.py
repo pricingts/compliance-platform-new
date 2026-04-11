@@ -62,6 +62,7 @@ pg = st.navigation(pages)
 # --- Sidebar: notifications + user info ---
 with st.sidebar:
     # Notifications badge (A2)
+    _notif_session = None
     try:
         _notif_session = SessionLocal()
         notifications = get_unread_notifications(_notif_session, user_email or "")
@@ -72,10 +73,14 @@ with st.sidebar:
                 if st.button("Marcar como leidas", key="mark_read"):
                     mark_notifications_read(_notif_session, user_email or "")
                     _notif_session.commit()
+                    _notif_session.close()
+                    _notif_session = None
                     st.rerun()
-        _notif_session.close()
     except Exception:
         pass
+    finally:
+        if _notif_session is not None:
+            _notif_session.close()
 
     render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):

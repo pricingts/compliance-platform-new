@@ -797,8 +797,12 @@ def forms():
                         seguimiento_text, comentarios_text,
                         internal_status_label, status_map,
                         lines, ports, customs,
-                        st.user.name
+                        getattr(st.user, "name", "dev-user") if hasattr(st, "user") else "dev-user"
                     )
+
+                # Clear pending comment to avoid duplicate on re-submit
+                st.session_state.pop(f"_pending_comment_{request_id}", None)
+                st.session_state.pop(f"_rejection_reason_{request_id}", None)
 
                 st.success(f"Cambios guardados correctamente. {changes} documento(s) nuevo(s) agregado(s).")
 

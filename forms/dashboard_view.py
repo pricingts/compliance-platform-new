@@ -125,7 +125,14 @@ def show_dashboard():
         render_section_header("Indicadores Clave")
 
         total = len(df)
-        last_7_days = len(df[df["Fecha creacion"] >= (datetime.utcnow() - timedelta(days=7))]) if "Fecha creacion" in df.columns else 0
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=7)
+            # Handle both naive and aware timestamps
+            last_7_days = len(df[df["Fecha creacion"].apply(
+                lambda x: x.replace(tzinfo=None) if hasattr(x, 'tzinfo') and x.tzinfo else x
+            ) >= cutoff]) if "Fecha creacion" in df.columns else 0
+        except Exception:
+            last_7_days = 0
 
         status_summary = _get_status_summary(session)
         aprobados = status_summary.get("aprobado", 0)
@@ -189,9 +196,10 @@ def show_dashboard():
             hide_index=True,
         )
 
-        # === CSV Export ===
-        csv_buffer = io.StringIO()
-        filtered.to_csv(csv_buffer, index=False)
+        # === CSV Export (with UTF-8 BOM for Excel) ===
+        csv_buffer = io.BytesIO()
+        csv_buffer.write(b'\xef\xbb\xbf')  # UTF-8 BOM for Excel
+        filtered.to_csv(csv_buffer, index=False, encoding='utf-8')
         st.download_button(
             "Exportar CSV",
             csv_buffer.getvalue(),

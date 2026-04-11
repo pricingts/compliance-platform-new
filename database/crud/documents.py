@@ -196,12 +196,6 @@ def get_customs_status(session: Session, request_id: int) -> list:
     """), {"req": request_id}).fetchall()
 
 
-def update_status(session: Session, table_name: str, record_id: int, status_id: int) -> None:
-    session.execute(
-        text(f"UPDATE {table_name} SET status_id = :st WHERE id = :rid"),
-        {"st": status_id, "rid": record_id}
-    )
-
 def upsert_status(
     session: Session,
     table_name: str,
@@ -333,6 +327,7 @@ def upsert_status(
 def batch_upsert_statuses(
     session: Session,
     updates: list[dict],
+    user_email: Optional[str] = None,
 ) -> None:
     """Batch upsert status updates in a single transaction.
 
@@ -351,6 +346,7 @@ def batch_upsert_statuses(
             entity_name=item["entity_name"],
             status_id=item["status_id"],
             terminal_name=item.get("terminal_name"),
+            user_email=item.get("user_email") or user_email,
         )
 
 
@@ -455,27 +451,44 @@ def get_requests_for_progress(
     only_for_email: Optional[str] = None,
     page: int = 0,
     page_size: int = 20,
+    search_term: Optional[str] = None,
 ) -> tuple[list[dict], int]:
-    """Return paginated requests and total count."""
-    count_sql = text("""
-        SELECT COUNT(*)
-        FROM requests
-        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
-    """)
-    total = session.execute(count_sql, {"email": only_for_email}).scalar()
-
-    sql = text("""
-        SELECT id, company_name, profile_id, created_at, user_email
-        FROM requests
-        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
-        ORDER BY created_at DESC
-        LIMIT :limit OFFSET :offset
-    """)
-    rows = session.execute(sql, {
+    """Return paginated requests and total count, with optional search."""
+    search_filter = ""
+    params: dict = {
         "email": only_for_email,
         "limit": page_size,
         "offset": page * page_size,
-    }).fetchall()
+    }
+
+    if search_term:
+        search_filter = """
+            AND (
+                LOWER(company_name) LIKE :search
+                OR CAST(id AS VARCHAR) LIKE :search_raw
+                OR LOWER(COALESCE(user_email, '')) LIKE :search
+            )
+        """
+        params["search"] = f"%{search_term.lower().strip()}%"
+        params["search_raw"] = f"%{search_term.strip()}%"
+
+    count_sql = text(f"""
+        SELECT COUNT(*)
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+        {search_filter}
+    """)
+    total = session.execute(count_sql, params).scalar()
+
+    sql = text(f"""
+        SELECT id, company_name, profile_id, created_at, user_email
+        FROM requests
+        WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
+        {search_filter}
+        ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    rows = session.execute(sql, params).fetchall()
 
     results = [
         {
@@ -505,27 +518,49 @@ def insert_comment_entry(
     image_file_name: Optional[str] = None,
 ) -> int:
     """Insert a new comment entry and return its id."""
-    result = session.execute(
-        text("""
-            INSERT INTO comment_entries
-                (request_id, author_email, author_name, content, entry_type,
-                 image_drive_link, image_file_name)
-            VALUES
-                (:request_id, :author_email, :author_name, :content, :entry_type,
-                 :image_drive_link, :image_file_name)
-            RETURNING id
-        """),
-        {
-            "request_id": request_id,
-            "author_email": author_email,
-            "author_name": author_name,
-            "content": content,
-            "entry_type": entry_type,
-            "image_drive_link": image_drive_link,
-            "image_file_name": image_file_name,
-        },
-    )
-    return result.scalar()
+    params = {
+        "request_id": request_id,
+        "author_email": author_email,
+        "author_name": author_name,
+        "content": content,
+        "entry_type": entry_type,
+        "image_drive_link": image_drive_link,
+        "image_file_name": image_file_name,
+    }
+
+    dialect = session.bind.dialect.name if session.bind else "unknown"
+
+    if dialect == "postgresql":
+        result = session.execute(
+            text("""
+                INSERT INTO comment_entries
+                    (request_id, author_email, author_name, content, entry_type,
+                     image_drive_link, image_file_name)
+                VALUES
+                    (:request_id, :author_email, :author_name, :content, :entry_type,
+                     :image_drive_link, :image_file_name)
+                RETURNING id
+            """),
+            params,
+        )
+        return result.scalar()
+    else:
+        # SQLite fallback
+        session.execute(
+            text("""
+                INSERT INTO comment_entries
+                    (request_id, author_email, author_name, content, entry_type,
+                     image_drive_link, image_file_name)
+                VALUES
+                    (:request_id, :author_email, :author_name, :content, :entry_type,
+                     :image_drive_link, :image_file_name)
+            """),
+            params,
+        )
+        row = session.execute(
+            text("SELECT id FROM comment_entries WHERE rowid = last_insert_rowid()")
+        ).fetchone()
+        return row[0] if row else None
 
 
 def get_comment_entries(session: Session, request_id: int) -> list[dict]:
@@ -584,7 +619,7 @@ def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
                    r.company_name
             FROM notifications n
             LEFT JOIN requests r ON r.id = n.request_id
-            WHERE n.user_email = :email AND n.is_read = FALSE
+            WHERE n.user_email = :email AND n.is_read = 0
             ORDER BY n.created_at DESC
         """),
         {"email": user_email},
@@ -605,7 +640,7 @@ def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
 def mark_notifications_read(session: Session, user_email: str) -> None:
     """Mark all notifications as read for a user."""
     session.execute(
-        text("UPDATE notifications SET is_read = TRUE WHERE user_email = :email"),
+        text("UPDATE notifications SET is_read = 1 WHERE user_email = :email"),
         {"email": user_email},
     )
 
@@ -616,6 +651,8 @@ def mark_notifications_read(session: Session, user_email: str) -> None:
 
 def get_audit_timeline(session: Session, request_id: int, limit: int = 50) -> list[dict]:
     """Return chronological audit entries for a request (newest first)."""
+    # Use exact delimiter "Request #N: " (with space after colon) to avoid
+    # matching Request #10 when searching for Request #1
     rows = session.execute(
         text("""
             SELECT timestamp, user_email, action, entity_type,
@@ -626,7 +663,7 @@ def get_audit_timeline(session: Session, request_id: int, limit: int = 50) -> li
             ORDER BY timestamp DESC
             LIMIT :limit
         """),
-        {"rid": request_id, "pattern": f"Request #{request_id}:%", "limit": limit}
+        {"rid": request_id, "pattern": f"Request #{request_id}: %", "limit": limit}
     ).fetchall()
 
     return [
