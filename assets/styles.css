@@ -39,7 +39,7 @@
 }
 
 [data-testid="stSidebarHeader"] img {
-    max-height: 56px !important;
+    max-height: 64px !important;
     width: auto !important;
 }
 
