@@ -2,3 +2,13 @@
 .env.superpowers/
 local_dev.db
 .env
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Internal tooling
+.superpowers/
+.claude/

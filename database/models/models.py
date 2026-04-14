@@ -95,6 +95,11 @@ class Request(Base):
         DateTime, default=datetime.utcnow, nullable=True,
     )
     user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Migration 003 additions
+    submitted_by_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    case_id: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, unique=True)
+    reminder_max_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Relationships
     profile: Mapped["Profile"] = relationship(back_populates="requests")
@@ -336,3 +341,78 @@ class AuditLog(Base):
     old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
     new_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# ===================================================================
+# 14. users (migration 003)
+# ===================================================================
+
+class User(Base):
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(255), primary_key=True)
+    nombre_display: Mapped[str] = mapped_column(String(255), nullable=False)
+    rol: Mapped[str] = mapped_column(String(20), nullable=False)  # comercial | inside_sales | compliance | otro
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+
+# ===================================================================
+# 15. inside_sales_comerciales (migration 003, many-to-many)
+# ===================================================================
+
+class InsideSalesComercial(Base):
+    __tablename__ = "inside_sales_comerciales"
+
+    inside_sales_email: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.email", ondelete="CASCADE"), primary_key=True,
+    )
+    comercial_email: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.email", ondelete="CASCADE"), primary_key=True,
+    )
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )
+    assigned_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+
+# ===================================================================
+# 16. request_attachments (migration 003)
+# ===================================================================
+
+class RequestAttachment(Base):
+    __tablename__ = "request_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("requests.id", ondelete="CASCADE"), nullable=False,
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    drive_link: Mapped[str] = mapped_column(Text, nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    uploaded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )
+
+
+# ===================================================================
+# 17. reminder_schedule (migration 003)
+# ===================================================================
+
+class ReminderSchedule(Base):
+    __tablename__ = "reminder_schedule"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("requests.id", ondelete="CASCADE"), nullable=False,
+    )
+    next_reminder_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    frequency_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True,
+    )

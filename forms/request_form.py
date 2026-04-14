@@ -14,10 +14,8 @@ from utils.error_handlers import handle_error
 from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
-    COMERCIALES,
     TERMINALES,
     TRADING_COUNTRIES,
-    REMINDER_FREQUENCIES,
     OPERATION_TYPES,
     CUSTOMS_SYSTEMS,
     SHIPPING_LINES,
@@ -25,6 +23,9 @@ from config.constants import (
     MSC_CONTAINER_TYPES,
     LANGUAGES,
     PROVIDER_TYPES,
+    ALLOWED_ATTACHMENT_TYPES,
+    REMINDER_FREQUENCY_OPTIONS,
+    REMINDER_MAX_MONTHS_OPTIONS,
 )
 
 logger = get_logger(__name__)
@@ -57,25 +58,153 @@ def _render_request_type_selector(session):
     return tipo_solicitud, profile_id
 
 
-def _render_requester_section(tipo_solicitud):
-    """Render the requester input depending on request type.
+def _build_requester_data(
+    current_user: dict,
+    dropdown_value=None,
+    text_input_value=None,
+    assigned_comerciales=None,
+    tipo_solicitud: str = "cliente",
+) -> dict:
+    """Pure function: decide what to put in the requester fields based on role.
+
+    Args:
+        current_user: dict with at least {email, nombre_display, rol}.
+        dropdown_value: selected value from the comercial dropdown (only used
+            when role is inside_sales).
+        text_input_value: value from the proveedor name text input (only used
+            for proveedor flow).
+        assigned_comerciales: list of {email, nombre_display} for the IS user.
+        tipo_solicitud: 'cliente' or 'proveedor'.
 
     Returns:
-        tuple: (requested_by, requested_by_type)
+        dict with keys:
+            valid (bool), error (str — only when valid=False),
+            requested_by (str), requested_by_type (str),
+            commercial (str|None), submitted_by_email (str|None).
     """
-    requested_by = None
-    requested_by_type = None
+    assigned_comerciales = assigned_comerciales or []
+    rol = current_user.get("rol", "otro")
+    nombre = current_user.get("nombre_display") or current_user.get("email") or "unknown"
+    email = current_user.get("email")
 
-    if tipo_solicitud.lower() == "cliente":
-        requested_by = st.selectbox("Comercial", COMERCIALES, key="comercial")
-        requested_by_type = "comercial"
-    elif tipo_solicitud.lower() == "proveedor":
-        requested_by = st.text_input(
+    # Provider flow: identical for every role — text_input + 'solicitante_proveedor' type.
+    if tipo_solicitud.lower() == "proveedor":
+        if not text_input_value:
+            return {
+                "valid": False,
+                "error": "Debes ingresar el nombre de quien solicita (proveedor).",
+                "requested_by": None,
+                "requested_by_type": None,
+                "commercial": None,
+                "submitted_by_email": None,
+            }
+        return {
+            "valid": True,
+            "requested_by": text_input_value,
+            "requested_by_type": "solicitante_proveedor",
+            "commercial": None,
+            "submitted_by_email": None,
+        }
+
+    # Cliente flow — branches by role
+    if rol == "comercial":
+        return {
+            "valid": True,
+            "requested_by": nombre,
+            "requested_by_type": "comercial",
+            "commercial": nombre,
+            "submitted_by_email": None,
+        }
+
+    if rol == "inside_sales":
+        if not assigned_comerciales:
+            return {
+                "valid": False,
+                "error": (
+                    "No tienes comerciales asignados. Contacta al administrador "
+                    "para que te asigne al menos uno antes de crear solicitudes."
+                ),
+                "requested_by": None,
+                "requested_by_type": None,
+                "commercial": None,
+                "submitted_by_email": None,
+            }
+        if not dropdown_value:
+            return {
+                "valid": False,
+                "error": "Debes seleccionar el comercial para el que estás creando la solicitud.",
+                "requested_by": None,
+                "requested_by_type": None,
+                "commercial": None,
+                "submitted_by_email": None,
+            }
+        return {
+            "valid": True,
+            "requested_by": nombre,
+            "requested_by_type": "inside_sales",
+            "commercial": dropdown_value,
+            "submitted_by_email": email,
+        }
+
+    # compliance / otro: no commercial field
+    return {
+        "valid": True,
+        "requested_by": nombre,
+        "requested_by_type": rol if rol in ("compliance", "otro") else "otro",
+        "commercial": None,
+        "submitted_by_email": None,
+    }
+
+
+def _render_requester_section(session, tipo_solicitud, current_user):
+    """Render the requester input depending on request type AND role.
+
+    Returns:
+        dict — see _build_requester_data for shape.
+    """
+    from services.users import get_comerciales_for_inside_sales
+
+    rol = current_user.get("rol", "otro")
+    nombre = current_user.get("nombre_display") or current_user.get("email") or "Usuario"
+
+    dropdown_value = None
+    text_input_value = None
+    assigned_comerciales = []
+
+    if tipo_solicitud.lower() == "proveedor":
+        text_input_value = st.text_input(
             "Nombre de quien solicita", key="solicitante_proveedor"
         )
-        requested_by_type = "solicitante_proveedor"
+    else:
+        # cliente flow
+        if rol == "comercial":
+            st.text_input("Comercial", value=nombre, disabled=True, key="comercial_readonly")
+        elif rol == "inside_sales":
+            assigned_comerciales = get_comerciales_for_inside_sales(
+                session, current_user.get("email")
+            )
+            if not assigned_comerciales:
+                st.warning(
+                    "No tienes comerciales asignados. Contacta al administrador."
+                )
+            else:
+                options = [c["nombre_display"] for c in assigned_comerciales]
+                dropdown_value = st.selectbox(
+                    "Comercial al que apoya esta solicitud",
+                    options,
+                    key="comercial_for_is",
+                )
+        else:
+            # compliance / otro: no commercial field
+            st.info(f"Solicitud creada por: {nombre} (rol: {rol})")
 
-    return requested_by, requested_by_type
+    return _build_requester_data(
+        current_user=current_user,
+        dropdown_value=dropdown_value,
+        text_input_value=text_input_value,
+        assigned_comerciales=assigned_comerciales,
+        tipo_solicitud=tipo_solicitud,
+    )
 
 
 def _render_company_info():
@@ -83,7 +212,7 @@ def _render_company_info():
 
     Returns:
         dict with keys: company_name, language, trading, email, location,
-              reminder_frequency.
+              reminder_frequency, reminder_frequency_days, reminder_max_months.
     """
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -104,11 +233,27 @@ def _render_company_info():
         location = st.text_input(
             "Pais de la Compañía a Registrar", key="ubicacion_compania"
         )
-        reminder_frequency = st.selectbox(
+
+    # Phase 7: two independent reminder selectboxes.
+    st.markdown("**Recordatorios**")
+    rcol1, rcol2 = st.columns(2)
+    with rcol1:
+        reminder_frequency_label = st.selectbox(
             "Frecuencia de recordatorio",
-            REMINDER_FREQUENCIES,
-            key="frecuencia_recordatorio",
+            list(REMINDER_FREQUENCY_OPTIONS.keys()),
+            key="reminder_frequency_label",
+            help="Cada cuánto se enviará el recordatorio.",
         )
+    with rcol2:
+        reminder_max_months_label = st.selectbox(
+            "Tiempo máximo de recordatorio",
+            list(REMINDER_MAX_MONTHS_OPTIONS.keys()),
+            key="reminder_max_months_label",
+            help="Cuándo dejar de enviar recordatorios.",
+        )
+
+    reminder_frequency_days = REMINDER_FREQUENCY_OPTIONS[reminder_frequency_label]
+    reminder_max_months = REMINDER_MAX_MONTHS_OPTIONS[reminder_max_months_label]
 
     return {
         "company_name": company_name,
@@ -116,7 +261,11 @@ def _render_company_info():
         "trading": trading,
         "email": email,
         "location": location,
-        "reminder_frequency": reminder_frequency,
+        # Legacy field stored as the friendly label (e.g. 'Semanal') for
+        # backward compatibility with sheets_writer and historical reports.
+        "reminder_frequency": reminder_frequency_label,
+        "reminder_frequency_days": reminder_frequency_days,
+        "reminder_max_months": reminder_max_months,
     }
 
 
@@ -218,6 +367,90 @@ def _render_client_specifics():
     }
 
 
+def _render_notes_and_attachments():
+    """Phase 4: textarea for notes + multi-file uploader.
+
+    Returns:
+        tuple (notes_str, list_of_uploaded_files)
+    """
+    notes = st.text_area(
+        "Notas para Compliance",
+        max_chars=2000,
+        help="Información adicional que el equipo de Compliance debe conocer (opcional).",
+        key="request_notes",
+        height=100,
+    )
+    files = st.file_uploader(
+        "Adjuntos (PDF, JPG, PNG, DOCX, XLSX — máx 10 MB c/u)",
+        type=ALLOWED_ATTACHMENT_TYPES,
+        accept_multiple_files=True,
+        key="request_attachments_files",
+    )
+    return notes, files or []
+
+
+def _upload_attachments_to_drive(
+    service,
+    base_folder_id,
+    entity_type: str,
+    company_name: str,
+    files: list,
+    uploaded_by: str,
+) -> list[dict]:
+    """Upload attachments to {entity_type_folder}/{company}/Adjuntos Solicitud/.
+
+    Returns a list of {file_name, drive_link} dicts for files that uploaded
+    successfully. Errors per-file are surfaced via st.warning but do not
+    abort the full upload.
+    """
+    import os
+    import tempfile
+    from services.google_drive_utils import (
+        find_or_create_folder, find_or_create_subfolder, upload_to_drive,
+    )
+    from utils.validators import validate_file_size
+
+    results: list[dict] = []
+    if not files:
+        return results
+
+    try:
+        company_folder_id = find_or_create_folder(
+            service, company_name, entity_type=entity_type, base_folder_id=base_folder_id,
+        )
+        attachments_folder_id = find_or_create_subfolder(
+            service, company_folder_id, "Adjuntos Solicitud",
+        )
+    except Exception as e:
+        logger.error("Failed to ensure attachments subfolder", extra={"error": str(e)})
+        st.warning(f"No se pudo crear la carpeta de adjuntos en Drive: {e}")
+        return results
+
+    for f in files:
+        if not validate_file_size(f):
+            st.warning(f"Archivo {f.name} excede 10 MB — omitido.")
+            continue
+        # Reuse the existing sanitize_filename helper
+        from forms.upload_documents_form import sanitize_filename
+        safe_name = sanitize_filename(f.name)
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(f.name)[1]) as tmp:
+                tmp.write(f.getbuffer())
+                tmp_path = tmp.name
+            try:
+                drive_link = upload_to_drive(service, attachments_folder_id, tmp_path, safe_name)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            results.append({"file_name": safe_name, "drive_link": drive_link})
+        except Exception as e:
+            logger.error("Attachment upload failed", extra={"file": safe_name, "error": str(e)})
+            st.warning(f"Fallo subiendo {safe_name}: {e}")
+    return results
+
+
 def _validate_form(company_name, email, tipo_solicitud, requested_by):
     """Validate form inputs. Shows st.error on failure.
 
@@ -257,6 +490,10 @@ def _save_request_to_db(
     terminales_seleccionados,
     tipo_linea,
     datos_msc,
+    commercial=None,
+    submitted_by_email=None,
+    notes=None,
+    reminder_max_months=None,
 ):
     """Persist the request and associated registrations to the database.
 
@@ -265,6 +502,10 @@ def _save_request_to_db(
     """
     with st.spinner("Guardando solicitud..."):
         try:
+            # The legacy `requested_by` arg drove BOTH the requested_by string
+            # AND the commercial column. Now they can diverge: an Inside Sales
+            # has requested_by=IS_name but commercial=elegido. So we pass them
+            # explicitly when commercial is provided, else fall back to legacy.
             request_id = insert_client_request(
                 session,
                 profile_id=profile_id,
@@ -287,9 +528,12 @@ def _save_request_to_db(
                 has_customs=aduana,
                 has_port=puerto,
                 has_shipping_line=linea_naviera,
-                requested_by=requested_by,
+                requested_by=commercial if commercial else requested_by,
                 requested_by_type=requested_by_type,
                 user_email=st.session_state.get("_user_email", "unknown"),
+                submitted_by_email=submitted_by_email,
+                notes=notes,
+                reminder_max_months=reminder_max_months,
             )
 
             if aduana and tipo_aduana:
@@ -442,6 +686,22 @@ def _save_to_sheets(
         )
 
 
+def _get_current_user(session):
+    """Build a current_user dict from session_state, augmenting with users table.
+
+    Falls back to a synthesized minimal dict if the email is not in users
+    (e.g. a brand new user before being added by an admin).
+    """
+    from services.users import get_user
+    email = st.session_state.get("_user_email")
+    rol = st.session_state.get("_user_role", "otro")
+    user = get_user(session, email) if email else None
+    if not user:
+        display = st.session_state.get("_user_display_name") or email or "Usuario"
+        user = {"email": email or "unknown", "nombre_display": display, "rol": rol, "activo": True}
+    return user
+
+
 def forms():
     """Main request form entry point.
 
@@ -454,9 +714,13 @@ def forms():
         if tipo_solicitud is None:
             return
 
-        requested_by, requested_by_type = _render_requester_section(
-            tipo_solicitud
-        )
+        current_user = _get_current_user(session)
+        requester = _render_requester_section(session, tipo_solicitud, current_user)
+        # Backward-compat: keep these locals so the rest of the function works.
+        requested_by = requester.get("requested_by")
+        requested_by_type = requester.get("requested_by_type")
+        commercial_for_request = requester.get("commercial")
+        submitted_by_email = requester.get("submitted_by_email")
         render_section_header("2. Datos de la Compania")
         company_info = _render_company_info()
 
@@ -470,8 +734,17 @@ def forms():
                 "Tipo de Proveedor", PROVIDER_TYPES, key="tipo_proveedor"
             )
 
+        # Phase 4: notes + attachments (optional, both flows)
+        render_section_header("4. Notas y Adjuntos")
+        notes, attachment_files = _render_notes_and_attachments()
+
         # -------- Save button (no st.form) --------
         if st.button("Guardar", key="guardar_general"):
+            # Re-validate the requester payload at submission time
+            if not requester.get("valid", True):
+                st.error(requester.get("error", "Datos del solicitante inválidos."))
+                return
+
             company_name = sanitize_company_name(company_info["company_name"])
 
             if not _validate_form(
@@ -505,9 +778,77 @@ def forms():
                 ),
                 tipo_linea=client_data.get("tipo_linea", []),
                 datos_msc=client_data.get("datos_msc", {}),
+                commercial=commercial_for_request,
+                submitted_by_email=submitted_by_email,
+                notes=notes or None,
+                reminder_max_months=company_info.get("reminder_max_months"),
             )
             if request_id is None:
                 return
+
+            # Phase 7: create reminder schedule
+            try:
+                from database.crud.reminders import insert_reminder_schedule
+                insert_reminder_schedule(
+                    session,
+                    request_id=request_id,
+                    frequency_days=company_info["reminder_frequency_days"],
+                    max_months=company_info["reminder_max_months"],
+                )
+            except Exception:
+                logger.warning("Failed to create reminder schedule", exc_info=True)
+
+            # Show case_id as proof of submission
+            from database.crud.clientes import get_case_id
+            _case_id = get_case_id(session, request_id)
+            if _case_id:
+                st.toast(f"Solicitud creada. Case ID: {_case_id}", icon=":material/task_alt:")
+
+            # Phase 4: upload attachments (best-effort, errors per-file)
+            if attachment_files:
+                try:
+                    from services.google_drive_utils import init_drive
+                    from database.crud.request_attachments import insert_request_attachment
+                    drive_service = init_drive()
+                    base_folder_key = (
+                        "clients_folder_id" if tipo_solicitud.lower() == "cliente"
+                        else "providers_folder_id"
+                    )
+                    base_folder_id = st.secrets["drive"][base_folder_key]
+                    uploaded_by = st.session_state.get("_user_email", "unknown")
+                    upload_results = _upload_attachments_to_drive(
+                        drive_service,
+                        base_folder_id=base_folder_id,
+                        entity_type=tipo_solicitud.lower(),
+                        company_name=company_name,
+                        files=attachment_files,
+                        uploaded_by=uploaded_by,
+                    )
+                    for r in upload_results:
+                        insert_request_attachment(
+                            session,
+                            request_id=request_id,
+                            file_name=r["file_name"],
+                            drive_link=r["drive_link"],
+                            uploaded_by=uploaded_by,
+                        )
+                        try:
+                            log_action(
+                                session=session,
+                                user_email=uploaded_by,
+                                action="UPLOAD",
+                                entity_type="request_attachment",
+                                entity_id=request_id,
+                                details=f"{r['file_name']}",
+                            )
+                            session.commit()
+                        except Exception:
+                            logger.warning("Audit log failed for attachment", exc_info=True)
+                    if upload_results:
+                        st.success(f"Se subieron {len(upload_results)} adjunto(s) a Drive.")
+                except Exception as e:
+                    logger.error("Attachment flow failed", extra={"error": str(e)})
+                    st.warning(f"Adjuntos no procesados: {e}")
 
             _save_to_sheets(
                 request_id=request_id,

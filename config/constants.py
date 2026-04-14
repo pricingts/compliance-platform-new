@@ -4,6 +4,33 @@ All magic strings and hardcoded values extracted from form files.
 Single source of truth for UI options and business data.
 """
 
+# Email domains allowed for user accounts in the admin panel.
+# Used by utils.validators.is_allowed_email_domain and by
+# forms/admin_users_form.py to reject external addresses.
+ALLOWED_EMAIL_DOMAINS = ("tradingsolutions.com", "tradingsol.com")
+
+# File types accepted as attachments on the initial request form (Phase 4 / F4).
+# Used by st.file_uploader's `type` argument.
+ALLOWED_ATTACHMENT_TYPES = ["pdf", "jpg", "jpeg", "png", "docx", "xlsx"]
+
+# Reminder system (Phase 7 / F7). Two independent dimensions:
+# - Frequency: how often the reminder fires (Semanal / Quincenal / Mensual)
+# - Max months: how long the reminders keep firing (1 / 2 / 3 months from creation)
+REMINDER_FREQUENCY_OPTIONS = {
+    "Semanal": 7,
+    "Quincenal": 14,
+    "Mensual": 30,
+}
+
+REMINDER_MAX_MONTHS_OPTIONS = {
+    "1 mes": 1,
+    "2 meses": 2,
+    "3 meses": 3,
+}
+
+# DEPRECATED — the active comerciales now come from the users table via
+# services.users.get_active_comerciales(). This list is kept only because
+# tests still reference it; it is no longer used by forms/request_form.py.
 # Commercial contacts
 COMERCIALES = [
     "Pedro Luis Bruges",

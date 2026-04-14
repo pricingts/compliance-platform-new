@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS requests (
     has_port BOOLEAN DEFAULT 0,
     has_shipping_line BOOLEAN DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    user_email VARCHAR(255)
+    user_email VARCHAR(255),
+    submitted_by_email VARCHAR(255),
+    notes TEXT,
+    case_id VARCHAR(10) UNIQUE,
+    reminder_max_months INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS comments (
@@ -144,6 +148,44 @@ CREATE TABLE IF NOT EXISTS audit_log (
     new_value TEXT,
     details TEXT
 );
+
+-- Migration 003 tables: SQLite-adapted versions (Postgres uses SERIAL, here AUTOINCREMENT)
+
+CREATE TABLE IF NOT EXISTS users (
+    email VARCHAR(255) PRIMARY KEY,
+    nombre_display VARCHAR(255) NOT NULL,
+    rol VARCHAR(20) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS inside_sales_comerciales (
+    inside_sales_email VARCHAR(255) NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    comercial_email    VARCHAR(255) NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    assigned_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by        VARCHAR(255),
+    PRIMARY KEY (inside_sales_email, comercial_email)
+);
+
+CREATE TABLE IF NOT EXISTS request_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    file_name VARCHAR(255) NOT NULL,
+    drive_link TEXT NOT NULL,
+    uploaded_by VARCHAR(255) NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reminder_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    next_reminder_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    frequency_days INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -155,6 +197,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 def db_engine():
     """Create a disposable SQLite in-memory engine with the full schema."""
     engine = create_engine("sqlite:///:memory:", echo=False)
+    # Enforce foreign keys for cascade-delete tests (SQLite defaults to off).
+    from sqlalchemy import event
+    @event.listens_for(engine, "connect")
+    def _enable_fk(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
     with engine.connect() as conn:
         for statement in _SCHEMA_SQL.strip().split(";"):
             statement = statement.strip()

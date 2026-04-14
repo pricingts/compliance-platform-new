@@ -22,6 +22,7 @@ def _get_dashboard_data(session) -> pd.DataFrame:
     rows = session.execute(text("""
         SELECT
             r.id,
+            r.case_id,
             r.company_name,
             r.profile_id,
             p.name AS profile_name,
@@ -30,6 +31,7 @@ def _get_dashboard_data(session) -> pd.DataFrame:
             r.country,
             r.email,
             r.user_email,
+            r.submitted_by_email,
             r.created_at,
             r.has_customs,
             r.has_port,
@@ -44,7 +46,7 @@ def _get_dashboard_data(session) -> pd.DataFrame:
 
     data = [
         {
-            "ID": r.id,
+            "Case ID": r.case_id or f"C{r.id:04d}",
             "Empresa": r.company_name or "—",
             "Perfil": r.profile_name or "—",
             "Comercial": r.commercial or "—",
@@ -52,6 +54,7 @@ def _get_dashboard_data(session) -> pd.DataFrame:
             "Pais": r.country or "—",
             "Email": r.email or "—",
             "Creado por": r.user_email or "—",
+            "Registrado por (IS)": r.submitted_by_email or "—",
             "Fecha creacion": r.created_at,
             "Aduana": "Si" if r.has_customs else "No",
             "Puerto": "Si" if r.has_port else "No",
@@ -189,7 +192,7 @@ def show_dashboard():
         st.caption(f"Mostrando {len(filtered)} de {total} solicitudes")
 
         # === Table ===
-        display_cols = ["ID", "Empresa", "Perfil", "Comercial", "Trading", "Pais", "Fecha creacion", "Aduana", "Puerto", "Naviera"]
+        display_cols = ["Case ID", "Empresa", "Perfil", "Comercial", "Trading", "Pais", "Fecha creacion", "Aduana", "Puerto", "Naviera"]
         st.dataframe(
             filtered[display_cols],
             use_container_width=True,

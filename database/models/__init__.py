@@ -14,6 +14,11 @@ from database.models.models import (  # noqa: F401
     ShippingLineRegistration,
     InternalRegistration,
     AuditLog,
+    # Migration 003
+    User,
+    InsideSalesComercial,
+    RequestAttachment,
+    ReminderSchedule,
 )
 
 __all__ = [
@@ -28,4 +33,8 @@ __all__ = [
     "ShippingLineRegistration",
     "InternalRegistration",
     "AuditLog",
+    "User",
+    "InsideSalesComercial",
+    "RequestAttachment",
+    "ReminderSchedule",
 ]
