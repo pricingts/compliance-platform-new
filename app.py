@@ -1,9 +1,11 @@
 """Compliance Platform — main entry point with st.navigation()."""
+from datetime import timedelta as _td
 from typing import Optional
 
 import streamlit as st
 from services.authentication import check_authentication
 from utils.ui_helpers import load_css, render_sidebar_user
+from utils.timezone import utc_now as _utc_now
 from database.db import SessionLocal
 from database.crud.documents import get_unread_notifications, mark_notifications_read
 from services.users import resolve_role, get_user
@@ -68,10 +70,6 @@ st.session_state["_is_admin"] = is_admin
 
 # Phase 7: dispatch due reminders, gated to once every 5 minutes per session
 # to avoid hammering the DB on every Streamlit rerun.
-from datetime import timedelta as _td
-
-from utils.timezone import utc_now as _utc_now
-
 _last_run_key = "_reminders_last_run"
 _last_run = st.session_state.get(_last_run_key)
 if _last_run is None or (_utc_now() - _last_run) > _td(minutes=5):

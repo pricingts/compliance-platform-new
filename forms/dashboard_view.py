@@ -141,7 +141,6 @@ def show_dashboard():
 
         status_summary = _get_status_summary(session)
         aprobados = status_summary.get("aprobado", 0)
-        pendientes = status_summary.get("pendiente", 0)
         en_revision = status_summary.get("en revision", 0)
         rechazados = status_summary.get("rechazado", 0)
 
