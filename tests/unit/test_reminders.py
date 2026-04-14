@@ -84,7 +84,7 @@ class TestGetDueReminders:
             created_at=datetime.utcnow() - timedelta(days=8),
         )
         # Disable it
-        db_session.execute(text("UPDATE reminder_schedule SET enabled=0 WHERE request_id=:rid"), {"rid": request_id})
+        db_session.execute(text("UPDATE reminder_schedule SET enabled=FALSE WHERE request_id=:rid"), {"rid": request_id})
         db_session.commit()
         assert get_due_reminders(db_session, now=datetime.utcnow()) == []
 

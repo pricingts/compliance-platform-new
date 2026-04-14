@@ -49,11 +49,15 @@ def insert_reminder_schedule(
             params,
         ).scalar()
     else:
+        # SQLite branch: TRUE literal is supported since 3.23 (we ship 3.49+)
+        # but we still need a separate INSERT/SELECT pair because SQLite has
+        # no RETURNING clause in older drivers and last_insert_rowid is the
+        # canonical way to fetch the new id.
         session.execute(
             text("""
                 INSERT INTO reminder_schedule
                   (request_id, next_reminder_at, expires_at, enabled, frequency_days)
-                VALUES (:request_id, :next_at, :expires_at, 1, :frequency_days)
+                VALUES (:request_id, :next_at, :expires_at, TRUE, :frequency_days)
             """),
             params,
         )
@@ -74,7 +78,7 @@ def get_due_reminders(session: Session, now: Optional[datetime] = None) -> list[
                    r.case_id, r.company_name, r.user_email, r.submitted_by_email
               FROM reminder_schedule rs
               JOIN requests r ON r.id = rs.request_id
-             WHERE rs.enabled = 1
+             WHERE rs.enabled = TRUE
                AND rs.next_reminder_at <= :cutoff
                AND rs.expires_at > :cutoff
         """),
@@ -111,8 +115,8 @@ def disable_expired_reminders(session: Session, now: Optional[datetime] = None) 
     result = session.execute(
         text("""
             UPDATE reminder_schedule
-               SET enabled = 0
-             WHERE enabled = 1
+               SET enabled = FALSE
+             WHERE enabled = TRUE
                AND expires_at <= :cutoff
         """),
         {"cutoff": cutoff},
