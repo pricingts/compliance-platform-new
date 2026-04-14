@@ -68,11 +68,13 @@ st.session_state["_is_admin"] = is_admin
 
 # Phase 7: dispatch due reminders, gated to once every 5 minutes per session
 # to avoid hammering the DB on every Streamlit rerun.
-from datetime import datetime as _dt, timedelta as _td
+from datetime import timedelta as _td
+
+from utils.timezone import utc_now as _utc_now
 
 _last_run_key = "_reminders_last_run"
 _last_run = st.session_state.get(_last_run_key)
-if _last_run is None or (_dt.utcnow() - _last_run) > _td(minutes=5):
+if _last_run is None or (_utc_now() - _last_run) > _td(minutes=5):
     try:
         from services.reminders import process_due_reminders
         _rem_session = SessionLocal()
@@ -80,7 +82,7 @@ if _last_run is None or (_dt.utcnow() - _last_run) > _td(minutes=5):
             process_due_reminders(_rem_session, current_user_email=user_email)
         finally:
             _rem_session.close()
-        st.session_state[_last_run_key] = _dt.utcnow()
+        st.session_state[_last_run_key] = _utc_now()
     except Exception:
         # Never block login on reminder failures
         pass
@@ -132,7 +134,7 @@ with st.sidebar:
 
     render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):
-        if st.button("Cerrar sesion", use_container_width=True):
+        if st.button("Cerrar sesion", width="stretch"):
             st.logout()
             st.session_state.authenticated = False
             st.rerun()

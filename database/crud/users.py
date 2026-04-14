@@ -111,7 +111,7 @@ def list_users(
         clauses.append("rol = :rol")
         params["rol"] = filter_rol
     if activo_only:
-        clauses.append("activo = 1")
+        clauses.append("activo = TRUE")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     sql = f"""
         SELECT email, nombre_display, rol, activo, created_at, created_by

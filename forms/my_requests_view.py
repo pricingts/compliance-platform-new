@@ -14,14 +14,14 @@ import streamlit as st
 from database.crud.my_requests import get_my_requests, get_aggregated_status_for_request
 from database.crud.documents import get_last_status_change_time
 from utils.ui_helpers import render_section_header
-from utils.timezone import to_colombia_tz
+from utils.timezone import to_colombia_tz, utc_now
 
 
 def _sla_badge(last_change: Optional[datetime]) -> str:
     """Mirror of forms.view_progress._sla_badge — kept here to avoid coupling."""
     if not last_change:
         return ""
-    now = datetime.utcnow()
+    now = utc_now()
     change_naive = (
         last_change.replace(tzinfo=None)
         if hasattr(last_change, "tzinfo") and last_change.tzinfo
@@ -76,7 +76,7 @@ def render_my_requests(session, current_user_email: str):
         })
 
     df = pd.DataFrame(enriched)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     # Compact KPIs
     total = len(rows)
@@ -95,7 +95,7 @@ def days_label(last_change: Optional[datetime]) -> str:
     """Plain-text version of _sla_badge for table cells."""
     if not last_change:
         return "—"
-    now = datetime.utcnow()
+    now = utc_now()
     change_naive = (
         last_change.replace(tzinfo=None)
         if hasattr(last_change, "tzinfo") and last_change.tzinfo

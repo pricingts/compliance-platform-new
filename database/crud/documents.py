@@ -619,7 +619,7 @@ def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
                    r.company_name
             FROM notifications n
             LEFT JOIN requests r ON r.id = n.request_id
-            WHERE n.user_email = :email AND n.is_read = 0
+            WHERE n.user_email = :email AND n.is_read = FALSE
             ORDER BY n.created_at DESC
         """),
         {"email": user_email},
@@ -640,7 +640,7 @@ def get_unread_notifications(session: Session, user_email: str) -> list[dict]:
 def mark_notifications_read(session: Session, user_email: str) -> None:
     """Mark all notifications as read for a user."""
     session.execute(
-        text("UPDATE notifications SET is_read = 1 WHERE user_email = :email"),
+        text("UPDATE notifications SET is_read = TRUE WHERE user_email = :email"),
         {"email": user_email},
     )
 

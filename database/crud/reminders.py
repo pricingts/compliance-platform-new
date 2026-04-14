@@ -14,6 +14,8 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from utils.timezone import utc_now
+
 
 def insert_reminder_schedule(
     session: Session,
@@ -27,7 +29,7 @@ def insert_reminder_schedule(
     next_reminder_at = created + frequency_days
     expires_at       = created + max_months * 30 days
     """
-    created = created_at or datetime.utcnow()
+    created = created_at or utc_now()
     next_at = created + timedelta(days=frequency_days)
     expires_at = created + timedelta(days=max_months * 30)
 
@@ -70,7 +72,7 @@ def insert_reminder_schedule(
 
 def get_due_reminders(session: Session, now: Optional[datetime] = None) -> list[dict[str, Any]]:
     """Return reminders that are enabled, not expired, and whose next_reminder_at has passed."""
-    cutoff = now or datetime.utcnow()
+    cutoff = now or utc_now()
     rows = session.execute(
         text("""
             SELECT rs.id, rs.request_id, rs.frequency_days,
@@ -111,7 +113,7 @@ def advance_reminder(session: Session, schedule_id: int, new_next_at: datetime) 
 
 def disable_expired_reminders(session: Session, now: Optional[datetime] = None) -> int:
     """Flip enabled=FALSE for any schedule past its expires_at. Returns rowcount."""
-    cutoff = now or datetime.utcnow()
+    cutoff = now or utc_now()
     result = session.execute(
         text("""
             UPDATE reminder_schedule

@@ -17,7 +17,7 @@ from database.crud.documents import (
 )
 from utils.form_helpers import cached_profiles_list, cached_profile_id, status_id_to_name_map
 from utils.ui_helpers import status_badge
-from utils.timezone import to_colombia_tz
+from utils.timezone import to_colombia_tz, utc_now
 from config.constants import DEFAULT_PAGE_SIZE
 
 
@@ -26,7 +26,7 @@ def _sla_badge(last_change: Optional[datetime]) -> str:
     if not last_change:
         return ""
     # Handle both naive and aware datetimes safely
-    now = datetime.utcnow()
+    now = utc_now()
     change_naive = last_change.replace(tzinfo=None) if hasattr(last_change, 'tzinfo') and last_change.tzinfo else last_change
     delta = now - change_naive
     days = delta.days

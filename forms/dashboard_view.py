@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 from datetime import datetime, timedelta
 
+from utils.timezone import utc_now
+
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text
@@ -129,7 +131,7 @@ def show_dashboard():
 
         total = len(df)
         try:
-            cutoff = datetime.utcnow() - timedelta(days=7)
+            cutoff = utc_now() - timedelta(days=7)
             # Handle both naive and aware timestamps
             last_7_days = len(df[df["Fecha creacion"].apply(
                 lambda x: x.replace(tzinfo=None) if hasattr(x, 'tzinfo') and x.tzinfo else x
@@ -195,7 +197,7 @@ def show_dashboard():
         display_cols = ["Case ID", "Empresa", "Perfil", "Comercial", "Trading", "Pais", "Fecha creacion", "Aduana", "Puerto", "Naviera"]
         st.dataframe(
             filtered[display_cols],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 

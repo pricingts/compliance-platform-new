@@ -11,7 +11,7 @@ Workflow:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from database.crud.reminders import (
 )
 from database.crud.documents import insert_notification
 from services.logging_config import get_logger
+from utils.timezone import utc_now
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,7 @@ def process_due_reminders(session: Session, current_user_email: Optional[str] = 
 
     Returns the number of due reminders processed (for logging/metrics).
     """
-    now = datetime.utcnow()
+    now = utc_now()
     try:
         disable_expired_reminders(session, now=now)
     except Exception:

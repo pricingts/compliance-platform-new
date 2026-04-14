@@ -11,6 +11,7 @@ from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.models.base import Base
+from utils.timezone import utc_now
 
 
 # ===================================================================
@@ -92,7 +93,7 @@ class Request(Base):
         Boolean, default=False, server_default="0",
     )
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
     user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     # Migration 003 additions
@@ -167,7 +168,7 @@ class Registration(Base):
     file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     drive_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     uploaded_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
     uploaded_by: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     razon_social: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -296,7 +297,7 @@ class CommentEntry(Base):
     image_drive_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
 
     # Relationships
@@ -318,7 +319,7 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
 
     # Relationships
@@ -333,7 +334,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     user_email: Mapped[str] = mapped_column(String(255))
     action: Mapped[str] = mapped_column(String(50))  # CREATE, UPDATE, DELETE, UPLOAD, STATUS_CHANGE
     entity_type: Mapped[str] = mapped_column(String(100))  # request, registration, customs, port, shipping_line
@@ -355,7 +356,7 @@ class User(Base):
     rol: Mapped[str] = mapped_column(String(20), nullable=False)  # comercial | inside_sales | compliance | otro
     activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
@@ -374,7 +375,7 @@ class InsideSalesComercial(Base):
         String(255), ForeignKey("users.email", ondelete="CASCADE"), primary_key=True,
     )
     assigned_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
     assigned_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
@@ -394,7 +395,7 @@ class RequestAttachment(Base):
     drive_link: Mapped[str] = mapped_column(Text, nullable=False)
     uploaded_by: Mapped[str] = mapped_column(String(255), nullable=False)
     uploaded_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )
 
 
@@ -414,5 +415,5 @@ class ReminderSchedule(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     frequency_days: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=True,
+        DateTime, default=utc_now, nullable=True,
     )

@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from utils.timezone import utc_now
+
 
 @pytest.fixture
 def request_id(db_session, seed_profiles):
@@ -72,29 +74,29 @@ class TestGetDueReminders:
         # Due reminder
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=1,
-            created_at=datetime.utcnow() - timedelta(days=8),
+            created_at=utc_now() - timedelta(days=8),
         )
-        due = get_due_reminders(db_session, now=datetime.utcnow())
+        due = get_due_reminders(db_session, now=utc_now())
         assert len(due) == 1
 
     def test_excludes_disabled(self, db_session, request_id):
         from database.crud.reminders import insert_reminder_schedule, get_due_reminders
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=1,
-            created_at=datetime.utcnow() - timedelta(days=8),
+            created_at=utc_now() - timedelta(days=8),
         )
         # Disable it
         db_session.execute(text("UPDATE reminder_schedule SET enabled=FALSE WHERE request_id=:rid"), {"rid": request_id})
         db_session.commit()
-        assert get_due_reminders(db_session, now=datetime.utcnow()) == []
+        assert get_due_reminders(db_session, now=utc_now()) == []
 
     def test_excludes_not_yet_due(self, db_session, request_id):
         from database.crud.reminders import insert_reminder_schedule, get_due_reminders
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=1,
-            created_at=datetime.utcnow(),  # next_reminder_at = now+7d
+            created_at=utc_now(),  # next_reminder_at = now+7d
         )
-        assert get_due_reminders(db_session, now=datetime.utcnow()) == []
+        assert get_due_reminders(db_session, now=utc_now()) == []
 
 
 class TestAdvanceReminder:
@@ -102,10 +104,10 @@ class TestAdvanceReminder:
         from database.crud.reminders import insert_reminder_schedule, advance_reminder
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=2,
-            created_at=datetime.utcnow() - timedelta(days=10),
+            created_at=utc_now() - timedelta(days=10),
         )
         sched_id = db_session.execute(text("SELECT id FROM reminder_schedule WHERE request_id=:rid"), {"rid": request_id}).scalar()
-        new_next = datetime.utcnow() + timedelta(days=7)
+        new_next = utc_now() + timedelta(days=7)
         advance_reminder(db_session, schedule_id=sched_id, new_next_at=new_next)
         next_at = db_session.execute(text("SELECT next_reminder_at FROM reminder_schedule WHERE id=:id"), {"id": sched_id}).scalar()
         # Compare loosely (strings vs datetimes vary by dialect)
@@ -118,9 +120,9 @@ class TestDisableExpired:
         # Created 4 months ago with 1-month limit → already expired
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=1,
-            created_at=datetime.utcnow() - timedelta(days=120),
+            created_at=utc_now() - timedelta(days=120),
         )
-        disable_expired_reminders(db_session, now=datetime.utcnow())
+        disable_expired_reminders(db_session, now=utc_now())
         enabled = db_session.execute(text("SELECT enabled FROM reminder_schedule WHERE request_id=:rid"), {"rid": request_id}).scalar()
         assert bool(enabled) is False
 
@@ -135,7 +137,7 @@ class TestProcessDueReminders:
         from services.reminders import process_due_reminders
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=2,
-            created_at=datetime.utcnow() - timedelta(days=8),
+            created_at=utc_now() - timedelta(days=8),
         )
         process_due_reminders(db_session)
         count = db_session.execute(text("SELECT COUNT(*) FROM notifications WHERE request_id=:rid"), {"rid": request_id}).scalar()
@@ -146,7 +148,7 @@ class TestProcessDueReminders:
         from services.reminders import process_due_reminders
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=2,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         process_due_reminders(db_session)
         count = db_session.execute(text("SELECT COUNT(*) FROM notifications WHERE request_id=:rid"), {"rid": request_id}).scalar()
@@ -164,7 +166,7 @@ class TestProcessDueReminders:
         rid = db_session.execute(text("SELECT id FROM requests LIMIT 1")).scalar()
         insert_reminder_schedule(
             db_session, request_id=rid, frequency_days=7, max_months=2,
-            created_at=datetime.utcnow() - timedelta(days=8),
+            created_at=utc_now() - timedelta(days=8),
         )
         process_due_reminders(db_session)
         # Both go to is@... but it's the same address, so only 1 notification
@@ -180,7 +182,7 @@ class TestProcessDueReminders:
         # Created 4 months ago with 1-month max → expired
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=1,
-            created_at=datetime.utcnow() - timedelta(days=120),
+            created_at=utc_now() - timedelta(days=120),
         )
         process_due_reminders(db_session)
         enabled = db_session.execute(text("SELECT enabled FROM reminder_schedule WHERE request_id=:rid"), {"rid": request_id}).scalar()
@@ -192,7 +194,7 @@ class TestProcessDueReminders:
         from services.reminders import process_due_reminders
         insert_reminder_schedule(
             db_session, request_id=request_id, frequency_days=7, max_months=2,
-            created_at=datetime.utcnow() - timedelta(days=8),
+            created_at=utc_now() - timedelta(days=8),
         )
         process_due_reminders(db_session)
         first_count = db_session.execute(text("SELECT COUNT(*) FROM notifications WHERE request_id=:rid"), {"rid": request_id}).scalar()
