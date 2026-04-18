@@ -10,7 +10,8 @@ from database.crud.clientes import (
 from services.sheets_writer import save_request
 from services.audit import log_action
 from services.logging_config import get_logger
-from utils.error_handlers import handle_error
+from utils.error_handlers import handle_error, sanitize_for_user
+from utils.exceptions import MailerError
 from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
@@ -693,6 +694,80 @@ def _save_to_sheets(
         )
 
 
+def _build_email_payload(
+    case_id,
+    tipo_solicitud,
+    company_name,
+    company_info,
+    requested_by,
+    client_data,
+):
+    """Assemble the dict consumed by the mailer template.
+
+    Keys align with the snake_case ``_FIELD_MAP`` declared in
+    ``services/mailer/templates.py`` so the rendered email mirrors the row
+    written to Google Sheets (same column order and labels).
+
+    ``case_id`` and ``fecha`` are included as bookkeeping — the renderer
+    ignores them because they are not in ``_FIELD_MAP`` — but they keep the
+    payload self-describing for debugging / future use.
+
+    Missing or None inputs collapse to ``""`` (never ``None``) so the
+    template's ``_is_empty`` check works uniformly.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    company_info = company_info or {}
+    client_data = client_data or {}
+    co_tz = ZoneInfo("America/Bogota")
+
+    tipo_aduana = client_data.get("tipo_aduana") or []
+    aduana_flag = client_data.get("aduana")
+    if tipo_aduana:
+        aduana_value = ", ".join(tipo_aduana)
+    elif aduana_flag:
+        aduana_value = "Sí"
+    else:
+        aduana_value = ""
+
+    terminales = client_data.get("terminales_seleccionados") or {}
+    puerto_flag = client_data.get("puerto")
+    if terminales:
+        puerto_value = ", ".join(terminales.keys())
+    elif puerto_flag:
+        puerto_value = "Sí"
+    else:
+        puerto_value = ""
+
+    tipo_linea = client_data.get("tipo_linea") or []
+    linea_flag = client_data.get("linea_naviera")
+    if tipo_linea:
+        linea_value = ", ".join(tipo_linea)
+    elif linea_flag:
+        linea_value = "Sí"
+    else:
+        linea_value = ""
+
+    return {
+        "case_id": case_id or "",
+        "fecha": datetime.now(co_tz).strftime("%Y-%m-%d %H:%M:%S"),
+        "requested_by": requested_by or "",
+        "tipo_solicitud": tipo_solicitud or "",
+        "company_name": company_name or "",
+        "email": company_info.get("email") or "",
+        "trading": company_info.get("trading") or "",
+        "location": company_info.get("location") or "",
+        "language": company_info.get("language") or "",
+        "reminder_frequency": company_info.get("reminder_frequency") or "",
+        "tipo_operacion": client_data.get("tipo_operacion") or "",
+        "commodity": client_data.get("commodity") or "",
+        "aduana": aduana_value,
+        "puerto": puerto_value,
+        "linea_naviera": linea_value,
+    }
+
+
 def _get_current_user(session):
     """Build a current_user dict from session_state, augmenting with users table.
 
@@ -881,6 +956,40 @@ def forms():
                 datos_msc=client_data.get("datos_msc", {}),
                 case_id=_case_id,
             )
+
+            # Phase 8: send compliance notification email (best-effort).
+            # Local import keeps the hot path clean and avoids pulling SMTP
+            # code into modules that never submit a form. NOTE: when
+            # st.secrets["mailer"]["enabled"] is True in production, the
+            # Apps Script notifier attached to the Google Sheet must be
+            # disabled to avoid duplicate emails to compliance.
+            try:
+                from services.mailer import send_request_notification
+                _payload = _build_email_payload(
+                    case_id=_case_id,
+                    tipo_solicitud=tipo_solicitud,
+                    company_name=company_name,
+                    company_info=company_info,
+                    requested_by=requested_by,
+                    client_data=client_data,
+                )
+                _creator_email = st.session_state.get("_user_email") or submitted_by_email
+                send_request_notification(
+                    session=session,
+                    case_id=_case_id,
+                    payload=_payload,
+                    creator_email=_creator_email,
+                    submitted_by_email=submitted_by_email,
+                )
+            except MailerError as e:
+                logger.error("Mailer failed for case %s", _case_id, exc_info=True)
+                st.warning(sanitize_for_user(e))
+            except Exception:
+                # Never fail the request because of mailer problems.
+                logger.exception("Unexpected mailer error for case %s", _case_id)
+                st.warning(
+                    "Solicitud guardada. Hubo un problema notificando a compliance por correo."
+                )
 
             session.close()
             st.success("Solicitud guardada correctamente")
