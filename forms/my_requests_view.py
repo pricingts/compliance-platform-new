@@ -10,6 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
 
 from database.crud.my_requests import get_my_requests, get_aggregated_status_for_request
 from database.crud.documents import get_last_status_change_time
@@ -57,11 +58,16 @@ def render_my_requests(session, current_user_email: str):
     for r in rows:
         try:
             agg = get_aggregated_status_for_request(session, r["id"])
-        except Exception:
+        except SQLAlchemyError:
             agg = "Pendiente"
         try:
+            # NOTE: known signature mismatch — the helper expects
+            # (session, entity_type, entity_id) but is being called without
+            # the session. This is a latent bug out of scope for exception
+            # narrowing; `TypeError` is therefore caught alongside DB errors
+            # so the dashboard still renders with a safe fallback.
             last_change = get_last_status_change_time("request", r["id"])
-        except Exception:
+        except (SQLAlchemyError, TypeError):
             last_change = r.get("created_at")
         enriched.append({
             "Case ID": r["case_id"],

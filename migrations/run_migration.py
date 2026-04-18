@@ -3,6 +3,10 @@ import os
 import sqlalchemy
 from sqlalchemy import text
 
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # Prefer public URL for external access, fallback to internal
 DATABASE_URL = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
@@ -58,11 +62,11 @@ with engine.connect() as conn:
             conn.execute(text(statement))
     conn.commit()
 
-print("Migration 002 applied successfully!")
+logger.info("Migration 002 applied successfully!")
 
 # Verify tables exist
 with engine.connect() as conn:
     for table in ["comment_entries", "notifications"]:
         result = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))
         count = result.scalar()
-        print(f"  {table}: {count} rows")
+        logger.info("  %s: %s rows", table, count)

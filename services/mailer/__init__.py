@@ -41,7 +41,8 @@ def _is_feature_enabled() -> bool:
     try:
         import streamlit as st
         mailer_cfg = st.secrets.get("mailer") if hasattr(st, "secrets") else None
-    except Exception:  # pragma: no cover
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):  # pragma: no cover
+        # Streamlit missing or secrets not loaded — treat feature as disabled.
         return False
     if not mailer_cfg:
         return False

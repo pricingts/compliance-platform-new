@@ -1002,8 +1002,10 @@ def forms():
             except MailerError as e:
                 logger.error("Mailer failed for case %s", _case_id, exc_info=True)
                 st.warning(sanitize_for_user(e))
-            except Exception:
-                # Never fail the request because of mailer problems.
+            except Exception:  # intentional-broad: defensive — the request
+                # has already been persisted successfully at this point; we
+                # must never surface an unexpected error from the notification
+                # path that would make the user think saving failed.
                 logger.exception("Unexpected mailer error for case %s", _case_id)
                 st.warning(
                     "Solicitud guardada. Hubo un problema notificando a compliance por correo."

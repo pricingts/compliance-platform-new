@@ -47,7 +47,8 @@ def _get_smtp_config() -> dict[str, Any]:
         smtp_secrets = st.secrets.get("smtp") if hasattr(st, "secrets") else None
         if smtp_secrets:
             cfg = dict(smtp_secrets)
-    except Exception:  # pragma: no cover
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):  # pragma: no cover
+        # Streamlit not available or secrets file missing — fall through to env vars.
         cfg = {}
 
     cfg.setdefault("host", os.environ.get("SMTP_HOST", ""))
@@ -153,6 +154,10 @@ def send_email(
     )
     try:
         _transport_send(msg, cfg)
+    # intentional-broad: this is the public SMTP boundary — we intentionally
+    # wrap every transport failure (smtplib.* subclasses, socket errors,
+    # timeouts, TLS errors, and anything the stdlib may raise) in MailerError
+    # so callers only have to handle one exception type.
     except Exception as e:
         logger.error(
             "SMTP send failed",

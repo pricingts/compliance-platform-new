@@ -44,11 +44,16 @@ def log_errors(
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 return func(*args, **kwargs)
+            # intentional-broad: `@log_errors` is the last-chance logging
+            # boundary for any wrapped function — by design it must catch
+            # everything so that no exception escapes unlogged.
             except Exception as exc:
                 # args_hash is a stable but non-sensitive fingerprint.
                 try:
                     args_hash = hash((tuple(repr(a) for a in args), tuple(sorted(kwargs.items()))))
-                except Exception:
+                except (TypeError, ValueError):
+                    # Unhashable items (e.g. dicts) or repr() failures just
+                    # suppress the fingerprint — never the surrounding log line.
                     args_hash = None
                 logger.exception(
                     "Unhandled exception in %s",

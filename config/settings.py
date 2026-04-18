@@ -8,7 +8,9 @@ def _get_secret(key: str, default: str = "") -> str:
     try:
         import streamlit as st
         return st.secrets.get(key, default)
-    except Exception:
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):
+        # Streamlit missing, secrets file missing, or running outside Streamlit
+        # context — fall through to env vars. Any other error should surface.
         return os.getenv(key, default)
 
 

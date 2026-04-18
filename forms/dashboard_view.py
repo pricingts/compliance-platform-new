@@ -136,7 +136,8 @@ def show_dashboard():
             last_7_days = len(df[df["Fecha creacion"].apply(
                 lambda x: x.replace(tzinfo=None) if hasattr(x, 'tzinfo') and x.tzinfo else x
             ) >= cutoff]) if "Fecha creacion" in df.columns else 0
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
+            # Bad/mixed tz types in the column just hide the KPI — no UI crash.
             last_7_days = 0
 
         status_summary = _get_status_summary(session)

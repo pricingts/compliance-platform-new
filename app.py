@@ -3,12 +3,17 @@ from datetime import timedelta as _td
 from typing import Optional
 
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
+
 from services.authentication import check_authentication
+from services.logging_config import get_logger
 from utils.ui_helpers import load_css, render_sidebar_user
 from utils.timezone import utc_now as _utc_now
 from database.db import SessionLocal
 from database.crud.documents import get_unread_notifications, mark_notifications_read
 from services.users import resolve_role, get_user
+
+logger = get_logger(__name__)
 
 st.set_page_config(page_title="Compliance Platform", layout="wide")
 load_css()
@@ -81,9 +86,11 @@ if _last_run is None or (_utc_now() - _last_run) > _td(minutes=5):
         finally:
             _rem_session.close()
         st.session_state[_last_run_key] = _utc_now()
-    except Exception:
-        # Never block login on reminder failures
-        pass
+    except (SQLAlchemyError, ImportError) as _rem_err:
+        # Reminder dispatch must never block login or the UI. DB failures are
+        # expected under load; an ImportError here would only fire if the
+        # reminders module itself is broken — either way, just log.
+        logger.exception("Reminder dispatch failed on page load: %s", _rem_err)
 
 # --- Navigation (only rendered when authenticated) ---
 pages_compliance = [
@@ -124,11 +131,16 @@ with st.sidebar:
                     _notif_session.close()
                     _notif_session = None
                     st.rerun()
-    except Exception:
-        pass
+    except SQLAlchemyError:
+        # DB hiccup while rendering the badge must never kill the sidebar.
+        logger.exception("Failed to render notifications badge")
     finally:
+        # Best-effort teardown: session may already be closed above after a rerun.
         if _notif_session is not None:
-            _notif_session.close()
+            try:
+                _notif_session.close()
+            except SQLAlchemyError:
+                logger.debug("notif_session close failed", exc_info=True)
 
     render_sidebar_user(user_name or "", user_email or "")
     if hasattr(st, "logout"):

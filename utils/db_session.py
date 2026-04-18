@@ -33,7 +33,10 @@ def transactional_session() -> Iterator[Session]:
     try:
         yield session
         session.commit()
-    except Exception:
+    except Exception:  # intentional-broad: any failure inside the `with` block
+        # must roll back the transaction and propagate. Narrowing to
+        # SQLAlchemyError would leak half-committed state on KeyboardInterrupt
+        # or app-level exceptions raised by the caller.
         session.rollback()
         raise
     finally:

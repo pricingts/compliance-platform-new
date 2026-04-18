@@ -1,5 +1,7 @@
 """Health check endpoint for Railway deployment monitoring."""
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
 from services.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -18,8 +20,8 @@ def check_db() -> bool:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+    except SQLAlchemyError as e:
+        logger.error("Database health check failed: %s", e)
         return False
 
 
