@@ -14,7 +14,7 @@ from services.sheets_writer import save_request
 from services.audit import log_action
 from services.logging_config import get_logger
 from utils.error_handlers import handle_error, sanitize_for_user
-from utils.exceptions import DriveUploadError, MailerError
+from utils.exceptions import DriveUploadError, MailerError, SheetsError
 from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
@@ -703,7 +703,7 @@ def _save_to_sheets(
                 ),
             }
         )
-    except (HttpError, OSError, GSpreadException) as e:
+    except (HttpError, OSError, GSpreadException, SheetsError) as e:
         logger.error(
             "Failed to save request to Google Sheets",
             extra={"request_id": request_id, "error": str(e)},

@@ -203,6 +203,85 @@ class TestProcessDueReminders:
         assert first_count == second_count
 
 
+class TestProcessDueRemindersExceptionHandling:
+    """Phase 5: specific-exception handling in process_due_reminders.
+
+    After hardening, only SQLAlchemyError is swallowed (and logged) inside
+    the loop. Programming bugs like KeyError / TypeError propagate so they
+    surface in CI instead of being silently lost.
+    """
+
+    def test_propagates_non_sqlalchemy_exceptions(self, db_session, monkeypatch):
+        """A KeyError from get_due_reminders must propagate (not be silenced)."""
+        import services.reminders as reminders_mod
+
+        def _boom(*args, **kwargs):
+            raise KeyError("programming bug")
+
+        monkeypatch.setattr(reminders_mod, "get_due_reminders", _boom)
+
+        with pytest.raises(KeyError):
+            reminders_mod.process_due_reminders(db_session)
+
+    def test_continues_on_sqlalchemy_error_per_row(self, db_session, monkeypatch):
+        """When insert_notification raises SQLAlchemyError for one row, the remaining rows still process."""
+        import services.reminders as reminders_mod
+        from sqlalchemy.exc import SQLAlchemyError
+
+        # Two fake due reminders
+        fake_due = [
+            {
+                "id": 1,
+                "request_id": 101,
+                "frequency_days": 7,
+                "next_reminder_at": None,
+                "expires_at": None,
+                "case_id": "C-A",
+                "company_name": "CompA",
+                "user_email": "owner-a@example.com",
+                "submitted_by_email": None,
+            },
+            {
+                "id": 2,
+                "request_id": 102,
+                "frequency_days": 7,
+                "next_reminder_at": None,
+                "expires_at": None,
+                "case_id": "C-B",
+                "company_name": "CompB",
+                "user_email": "owner-b@example.com",
+                "submitted_by_email": None,
+            },
+        ]
+
+        monkeypatch.setattr(reminders_mod, "get_due_reminders", lambda *a, **kw: fake_due)
+        monkeypatch.setattr(reminders_mod, "disable_expired_reminders", lambda *a, **kw: 0)
+
+        advanced_ids: list[int] = []
+
+        def _fake_advance(session, schedule_id, new_next_at):
+            advanced_ids.append(schedule_id)
+
+        monkeypatch.setattr(reminders_mod, "advance_reminder", _fake_advance)
+
+        inserted_for: list[str] = []
+
+        def _fake_insert(session, user_email, request_id, message):
+            if request_id == 101:
+                raise SQLAlchemyError("db blip for row 1")
+            inserted_for.append(user_email)
+
+        monkeypatch.setattr(reminders_mod, "insert_notification", _fake_insert)
+
+        processed = reminders_mod.process_due_reminders(db_session)
+
+        # Both schedules should have been processed (advance fired for each)
+        assert processed == 2
+        assert advanced_ids == [1, 2]
+        # Second row's notification went through
+        assert "owner-b@example.com" in inserted_for
+
+
 class TestInsertWithReminderMaxMonths:
     def test_persists_reminder_max_months(self, db_session, seed_profiles):
         from database.crud.clientes import insert_client_request

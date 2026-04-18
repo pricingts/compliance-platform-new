@@ -38,3 +38,8 @@ class AuthenticationError(ComplianceError):
 class MailerError(ComplianceError):
     """Error al enviar notificación por correo."""
     pass
+
+
+class SheetsError(ComplianceError):
+    """Google Sheets operation failures (read/write/worksheet lookup)."""
+    pass
