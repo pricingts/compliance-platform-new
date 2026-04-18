@@ -5,6 +5,8 @@ import tempfile
 import unicodedata
 import streamlit as st
 from datetime import datetime
+from googleapiclient.errors import HttpError
+from sqlalchemy.exc import SQLAlchemyError
 from database.db import SessionLocal
 from database.crud.documents import (
     get_requests_by_company_and_profile,
@@ -27,7 +29,8 @@ from database.crud.documents import (
 from utils.form_helpers import cached_company_names, cached_profiles_list, cached_profile_id
 from utils.timezone import to_colombia_tz
 from utils.ui_helpers import render_section_header
-from utils.error_handlers import handle_error
+from utils.error_handlers import handle_error, sanitize_for_user
+from utils.exceptions import DriveUploadError
 from services.audit import log_action
 from services.logging_config import get_logger
 
@@ -539,9 +542,14 @@ def _upload_files_to_drive(service, folder_id, uploaded_buffers, profile_id):
 
                 results.append((doc_type_id, safe_name, drive_link))
                 changes += 1
-            except Exception as e:
+            except (HttpError, OSError, DriveUploadError) as e:
                 logger.exception(f"Drive upload failed for {safe_name}")
-                st.error(f"Error al subir {safe_name}: {e}")
+                st.error(
+                    sanitize_for_user(
+                        e,
+                        default=f"Error al subir {safe_name}.",
+                    )
+                )
                 # Continue with next file instead of aborting
             finally:
                 if tmp_path and os.path.exists(tmp_path):
@@ -667,7 +675,7 @@ def _save_all_data(
                 finally:
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
-            except Exception as e:
+            except (HttpError, OSError, DriveUploadError) as e:
                 logger.warning(f"Failed to upload comment image: {e}")
 
         insert_comment_entry(
@@ -705,7 +713,7 @@ def _save_all_data(
 
     try:
         session.commit()
-    except Exception:
+    except SQLAlchemyError:
         session.rollback()
         logger.exception("Failed to commit upload form data")
         raise
@@ -806,10 +814,13 @@ def forms():
 
                 st.success(f"Cambios guardados correctamente. {changes} documento(s) nuevo(s) agregado(s).")
 
-            except Exception as e:
+            except (HttpError, OSError, DriveUploadError, SQLAlchemyError, KeyError) as e:
                 session.rollback()
                 logger.exception("Error saving upload form data")
-                handle_error(e, "Error al guardar los datos.")
+                handle_error(
+                    e,
+                    sanitize_for_user(e, default="Error al guardar los datos."),
+                )
 
     finally:
         session.close()

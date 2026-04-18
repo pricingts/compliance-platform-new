@@ -1,4 +1,7 @@
 import streamlit as st
+from googleapiclient.errors import HttpError
+from gspread.exceptions import GSpreadException
+from sqlalchemy.exc import SQLAlchemyError
 from database.db import SessionLocal
 from database.crud.clientes import (
     insert_client_request,
@@ -11,7 +14,7 @@ from services.sheets_writer import save_request
 from services.audit import log_action
 from services.logging_config import get_logger
 from utils.error_handlers import handle_error, sanitize_for_user
-from utils.exceptions import MailerError
+from utils.exceptions import DriveUploadError, MailerError
 from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
@@ -46,7 +49,7 @@ def _render_request_type_selector(session):
 
     try:
         profile_id = get_profile_id(session, tipo_solicitud)
-    except Exception as e:
+    except SQLAlchemyError as e:
         session.close()
         handle_error(e, "Error al conectar con la base de datos.")
         return None, None
@@ -422,9 +425,14 @@ def _upload_attachments_to_drive(
         attachments_folder_id = find_or_create_subfolder(
             service, company_folder_id, "Adjuntos Solicitud",
         )
-    except Exception as e:
+    except (HttpError, OSError, DriveUploadError) as e:
         logger.error("Failed to ensure attachments subfolder", extra={"error": str(e)})
-        st.warning(f"No se pudo crear la carpeta de adjuntos en Drive: {e}")
+        st.warning(
+            sanitize_for_user(
+                e,
+                default="No se pudo crear la carpeta de adjuntos en Drive.",
+            )
+        )
         return results
 
     for f in files:
@@ -446,9 +454,14 @@ def _upload_attachments_to_drive(
                 except OSError:
                     pass
             results.append({"file_name": safe_name, "drive_link": drive_link})
-        except Exception as e:
+        except (HttpError, OSError, DriveUploadError) as e:
             logger.error("Attachment upload failed", extra={"file": safe_name, "error": str(e)})
-            st.warning(f"Fallo subiendo {safe_name}: {e}")
+            st.warning(
+                sanitize_for_user(
+                    e,
+                    default=f"Fallo subiendo {safe_name}.",
+                )
+            )
     return results
 
 
@@ -576,18 +589,21 @@ def _save_request_to_db(
                     details=f"Request #{request_id}: {company_name}",
                 )
                 session.commit()
-            except Exception:
+            except SQLAlchemyError:
                 logger.warning("Audit log failed for request creation", exc_info=True)
 
             return request_id
-        except Exception as e:
+        except SQLAlchemyError as e:
             session.rollback()
             session.close()
             logger.error(
                 "Failed to save request to database",
                 extra={"error": str(e)},
             )
-            handle_error(e, f"Error al guardar la solicitud: {e}")
+            handle_error(
+                e,
+                sanitize_for_user(e, default="Error al guardar la solicitud."),
+            )
             return None
 
 
@@ -687,7 +703,7 @@ def _save_to_sheets(
                 ),
             }
         )
-    except Exception as e:
+    except (HttpError, OSError, GSpreadException) as e:
         logger.error(
             "Failed to save request to Google Sheets",
             extra={"request_id": request_id, "error": str(e)},
@@ -877,7 +893,7 @@ def forms():
                     frequency_days=company_info["reminder_frequency_days"],
                     max_months=company_info["reminder_max_months"],
                 )
-            except Exception:
+            except SQLAlchemyError:
                 logger.warning("Failed to create reminder schedule", exc_info=True)
 
             # Show case_id as proof of submission
@@ -924,13 +940,15 @@ def forms():
                                 details=f"{r['file_name']}",
                             )
                             session.commit()
-                        except Exception:
+                        except SQLAlchemyError:
                             logger.warning("Audit log failed for attachment", exc_info=True)
                     if upload_results:
                         st.success(f"Se subieron {len(upload_results)} adjunto(s) a Drive.")
-                except Exception as e:
+                except (HttpError, OSError, DriveUploadError, SQLAlchemyError, KeyError) as e:
                     logger.error("Attachment flow failed", extra={"error": str(e)})
-                    st.warning(f"Adjuntos no procesados: {e}")
+                    st.warning(
+                        sanitize_for_user(e, default="Adjuntos no procesados.")
+                    )
 
             _save_to_sheets(
                 request_id=request_id,
@@ -994,7 +1012,11 @@ def forms():
             session.close()
             st.success("Solicitud guardada correctamente")
     finally:
+        # session.close() is best-effort cleanup in the finally path: we do not
+        # want a secondary failure during teardown (e.g. a stale/broken pool
+        # connection) to mask the original exception or crash the page. A
+        # broad except is intentional here.
         try:
             session.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - intentional best-effort teardown
             pass
