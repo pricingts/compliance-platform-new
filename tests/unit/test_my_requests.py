@@ -87,6 +87,109 @@ class TestGetMyRequests:
         assert "C0001" in case_ids and "C0002" in case_ids
 
 
+class TestRenderMyRequestsPassesSession:
+    """Regression tests for the latent bug fixed in this commit: the view was
+    calling ``get_last_status_change_time("request", r["id"])`` without the
+    ``session`` argument, triggering a silent ``TypeError`` that was swallowed
+    by the narrowed except in forms/my_requests_view.py.
+    """
+
+    def test_get_last_status_change_time_is_called_with_session(
+        self, db_session, seed_profiles, seed_statuses, mock_streamlit, monkeypatch
+    ):
+        """Assert the CRUD helper is invoked with (session, entity_type, entity_id)."""
+        from datetime import datetime
+        from unittest.mock import MagicMock
+
+        # Seed one request owned by alice.
+        pid = seed_profiles["cliente"]
+        db_session.execute(text("""
+            INSERT INTO requests (profile_id, company_name, user_email, case_id)
+            VALUES (:pid, 'Acme', 'alice@tradingsolutions.com', 'C0001')
+        """), {"pid": pid})
+        db_session.commit()
+
+        # Patch CRUD helper where the view imports it.
+        fake_last_change = datetime(2026, 4, 10, 12, 0, 0)
+        mock_helper = MagicMock(return_value=fake_last_change)
+        monkeypatch.setattr(
+            "forms.my_requests_view.get_last_status_change_time", mock_helper
+        )
+
+        # Patch st components the view renders so we can import render_my_requests.
+        monkeypatch.setattr("streamlit.dataframe", MagicMock())
+        monkeypatch.setattr("streamlit.columns", MagicMock(return_value=[
+            MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        ]))
+        monkeypatch.setattr("streamlit.caption", MagicMock())
+        monkeypatch.setattr("streamlit.info", MagicMock())
+        monkeypatch.setattr("streamlit.markdown", MagicMock())
+        monkeypatch.setattr("streamlit.metric", MagicMock())
+        # Neutralize a SQLite-only quirk: rows return created_at as str, not datetime.
+        monkeypatch.setattr("forms.my_requests_view.to_colombia_tz", lambda x: x)
+
+        from forms.my_requests_view import render_my_requests
+        render_my_requests(db_session, "alice@tradingsolutions.com")
+
+        # Must have been called at least once, and with session as first arg.
+        assert mock_helper.call_count >= 1
+        first_call_args = mock_helper.call_args_list[0]
+        # Accept either positional or keyword passing of session.
+        args, kwargs = first_call_args
+        if args:
+            assert args[0] is db_session, (
+                "First positional argument must be the SQLAlchemy session"
+            )
+            assert args[1] == "request"
+        else:
+            assert kwargs.get("session") is db_session
+            assert kwargs.get("entity_type") == "request"
+
+    def test_get_last_status_change_time_receives_entity_id(
+        self, db_session, seed_profiles, seed_statuses, mock_streamlit, monkeypatch
+    ):
+        """Assert the CRUD helper also receives the correct request id as entity_id."""
+        from unittest.mock import MagicMock
+
+        pid = seed_profiles["cliente"]
+        db_session.execute(text("""
+            INSERT INTO requests (profile_id, company_name, user_email, case_id)
+            VALUES (:pid, 'Acme', 'alice@tradingsolutions.com', 'C0200')
+        """), {"pid": pid})
+        db_session.commit()
+        request_id = db_session.execute(
+            text("SELECT id FROM requests WHERE case_id = 'C0200'")
+        ).scalar()
+
+        # Return None so days_label handles it gracefully (returns '—').
+        mock_helper = MagicMock(return_value=None)
+        monkeypatch.setattr(
+            "forms.my_requests_view.get_last_status_change_time", mock_helper
+        )
+        monkeypatch.setattr("streamlit.dataframe", MagicMock())
+        monkeypatch.setattr("streamlit.columns", MagicMock(return_value=[
+            MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        ]))
+        monkeypatch.setattr("streamlit.caption", MagicMock())
+        monkeypatch.setattr("streamlit.info", MagicMock())
+        monkeypatch.setattr("streamlit.markdown", MagicMock())
+        monkeypatch.setattr("streamlit.metric", MagicMock())
+        monkeypatch.setattr("forms.my_requests_view.to_colombia_tz", lambda x: x)
+
+        from forms.my_requests_view import render_my_requests
+        render_my_requests(db_session, "alice@tradingsolutions.com")
+
+        # entity_type == 'request' and entity_id == the request we just seeded.
+        call_args = mock_helper.call_args_list[0]
+        args, kwargs = call_args
+        if args:
+            assert args[1] == "request"
+            assert args[2] == request_id
+        else:
+            assert kwargs.get("entity_type") == "request"
+            assert kwargs.get("entity_id") == request_id
+
+
 class TestAggregateStatus:
     def test_all_approved_is_completa(self):
         from database.crud.my_requests import aggregate_status

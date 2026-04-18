@@ -61,13 +61,8 @@ def render_my_requests(session, current_user_email: str):
         except SQLAlchemyError:
             agg = "Pendiente"
         try:
-            # NOTE: known signature mismatch — the helper expects
-            # (session, entity_type, entity_id) but is being called without
-            # the session. This is a latent bug out of scope for exception
-            # narrowing; `TypeError` is therefore caught alongside DB errors
-            # so the dashboard still renders with a safe fallback.
-            last_change = get_last_status_change_time("request", r["id"])
-        except (SQLAlchemyError, TypeError):
+            last_change = get_last_status_change_time(session, "request", r["id"])
+        except SQLAlchemyError:
             last_change = r.get("created_at")
         enriched.append({
             "Case ID": r["case_id"],
