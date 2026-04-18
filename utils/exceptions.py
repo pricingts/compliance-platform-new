@@ -33,3 +33,8 @@ class ValidationError(ComplianceError):
 class AuthenticationError(ComplianceError):
     """Authentication/authorization failures."""
     pass
+
+
+class MailerError(ComplianceError):
+    """Error al enviar notificación por correo."""
+    pass
