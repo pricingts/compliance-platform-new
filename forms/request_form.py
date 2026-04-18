@@ -610,12 +610,19 @@ def _save_to_sheets(
     linea_naviera,
     tipo_linea,
     datos_msc,
+    case_id=None,
 ):
-    """Sync the request to Google Sheets. Errors are logged but not fatal."""
+    """Sync the request to Google Sheets. Errors are logged but not fatal.
+
+    ``case_id`` is the human-friendly identifier (e.g. ``C0042``) derived
+    from the new ``requests.case_id`` column. Passed as the first column in
+    the sheet; defaults to empty string when not provided.
+    """
     try:
         save_request(
             {
                 "request_id": request_id,
+                "case_id": case_id or "",
                 "tipo_solicitud": tipo_solicitud,
                 "company_name": company_name,
                 "email": email,
@@ -872,6 +879,7 @@ def forms():
                 linea_naviera=client_data.get("linea_naviera", False),
                 tipo_linea=client_data.get("tipo_linea", []),
                 datos_msc=client_data.get("datos_msc", {}),
+                case_id=_case_id,
             )
 
             session.close()

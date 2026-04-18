@@ -59,6 +59,7 @@ def save_request(request_info: dict):
     _init()
 
     headers = [
+        "Case ID",
         "Fecha",
         "Solicitante",
         "Tipo de solicitud",
@@ -82,6 +83,7 @@ def save_request(request_info: dict):
     fecha_creacion = datetime.now(CO_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     row = [
+        request_info.get("case_id", ""),
         fecha_creacion,
         request_info.get("requested_by", ""),
         request_info.get("tipo_solicitud", ""),

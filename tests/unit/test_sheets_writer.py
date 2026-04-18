@@ -94,7 +94,12 @@ class TestSheetsWriterFunctions:
                 sys.modules[mod_name] = saved
 
     def test_save_request_appends_row(self, mock_streamlit, mock_google_sheets):
-        """save_request should append a row to the worksheet."""
+        """save_request should append a row to the worksheet.
+
+        After the Case ID change (Fase 1), the column layout is:
+            [0] Case ID, [1] Fecha, [2] Solicitante, [3] Tipo de solicitud,
+            [4] Nombre Compañía, [5] Correo, ...
+        """
         mod_name = "services.sheets_writer"
         saved = sys.modules.pop(mod_name, None)
         try:
@@ -105,6 +110,7 @@ class TestSheetsWriterFunctions:
             mock_ws = mock_google_sheets.open_by_key.return_value.worksheet.return_value
 
             request_info = {
+                "case_id": "C0001",
                 "requested_by": "Juan",
                 "tipo_solicitud": "Cliente",
                 "company_name": "TestCorp",
@@ -124,10 +130,86 @@ class TestSheetsWriterFunctions:
 
             mock_ws.append_row.assert_called_once()
             row_data = mock_ws.append_row.call_args[0][0]
-            # First element is the date, rest are from request_info
-            assert row_data[1] == "Juan"
-            assert row_data[3] == "TestCorp"
-            assert row_data[4] == "test@test.com"
+            # [0] Case ID, [1] Fecha, [2] Solicitante, [3] Tipo, [4] Compañía, [5] Correo
+            assert row_data[0] == "C0001"
+            assert row_data[2] == "Juan"
+            assert row_data[4] == "TestCorp"
+            assert row_data[5] == "test@test.com"
+        finally:
+            sw._client = None
+            sw._sheets_service = None
+            sw._compliance_id = None
+            if saved is not None:
+                sys.modules[mod_name] = saved
+
+    def test_save_request_includes_case_id_as_first_column(
+        self, mock_streamlit, mock_google_sheets
+    ):
+        """Case ID must be the first column, both in headers and row values."""
+        import gspread
+
+        # Force worksheet creation so we can assert the header row.
+        mock_spreadsheet = mock_google_sheets.open_by_key.return_value
+        mock_spreadsheet.worksheet.side_effect = gspread.exceptions.WorksheetNotFound(
+            "NotFound"
+        )
+        mock_new_ws = MagicMock()
+        mock_spreadsheet.add_worksheet.return_value = mock_new_ws
+
+        mod_name = "services.sheets_writer"
+        saved = sys.modules.pop(mod_name, None)
+        try:
+            import services.sheets_writer as sw
+            sw._client = mock_google_sheets
+            sw._compliance_id = "test_compliance_id"
+
+            request_info = {
+                "case_id": "C0042",
+                "requested_by": "Alice",
+                "tipo_solicitud": "Cliente",
+                "company_name": "AcmeCorp",
+                "email": "alice@acme.com",
+            }
+
+            sw.save_request(request_info)
+
+            # First append_row call is the headers when creating a new sheet
+            # Second append_row call is the data row
+            assert mock_new_ws.append_row.call_count >= 1
+            calls = mock_new_ws.append_row.call_args_list
+            headers = calls[0][0][0]
+            assert headers[0] == "Case ID", f"First header must be 'Case ID', got {headers!r}"
+
+            # Data row was appended on the new worksheet as well
+            row_data = calls[1][0][0]
+            assert row_data[0] == "C0042", (
+                f"First column of data row must be case_id, got {row_data!r}"
+            )
+        finally:
+            sw._client = None
+            sw._sheets_service = None
+            sw._compliance_id = None
+            if saved is not None:
+                sys.modules[mod_name] = saved
+
+    def test_save_request_case_id_defaults_to_empty_string(
+        self, mock_streamlit, mock_google_sheets
+    ):
+        """When case_id is not provided, the first column should default to empty string."""
+        mod_name = "services.sheets_writer"
+        saved = sys.modules.pop(mod_name, None)
+        try:
+            import services.sheets_writer as sw
+            sw._client = mock_google_sheets
+            sw._compliance_id = "test_compliance_id"
+
+            mock_ws = mock_google_sheets.open_by_key.return_value.worksheet.return_value
+
+            sw.save_request({"company_name": "NoCaseId"})
+
+            mock_ws.append_row.assert_called_once()
+            row_data = mock_ws.append_row.call_args[0][0]
+            assert row_data[0] == "", "Missing case_id must fall back to empty string"
         finally:
             sw._client = None
             sw._sheets_service = None

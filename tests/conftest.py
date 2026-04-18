@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS requests (
     submitted_by_email VARCHAR(255),
     notes TEXT,
     case_id VARCHAR(10) UNIQUE,
-    reminder_max_months INTEGER
+    reminder_max_months INTEGER,
+    email_notified_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS comments (
