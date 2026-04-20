@@ -43,3 +43,14 @@ class MailerError(ComplianceError):
 class SheetsError(ComplianceError):
     """Google Sheets operation failures (read/write/worksheet lookup)."""
     pass
+
+
+class DelegationError(MailerError):
+    """Raised when Domain-Wide Delegation is missing or misconfigured.
+
+    Thrown on 401/403 HttpError responses from Gmail API that indicate the
+    service account lacks authorization to impersonate the target user for
+    the gmail.send scope. The message includes the target user so operators
+    can verify the scope is approved for the service account client ID in
+    Admin Console.
+    """
