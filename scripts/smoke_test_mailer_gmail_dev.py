@@ -97,7 +97,7 @@ def main() -> int:
     engine = sa.create_engine(url)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
-    case_id = "C-GMAIL-SMOKE"
+    case_id = "CGSMK0001"  # fits requests.case_id VARCHAR(10)
     tag = f"GMAIL-SMOKE-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
 
     try:
