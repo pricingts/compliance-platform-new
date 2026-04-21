@@ -35,6 +35,23 @@ from config.constants import (
 logger = get_logger(__name__)
 
 
+def _is_sheets_enabled() -> bool:
+    """Return True iff ``st.secrets['sheets']['enabled']`` is truthy.
+
+    Default-off: once the Python mailer is handling notifications, the
+    legacy Google Sheet write-through is redundant (and keeps the Apps
+    Script notifier alive, duplicating the email). Operators can flip the
+    flag back on to re-enable the Sheet for auditing or rollback.
+    """
+    try:
+        cfg = st.secrets.get("sheets") if hasattr(st, "secrets") else None
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):
+        return False
+    if not cfg:
+        return False
+    return bool(cfg.get("enabled", False))
+
+
 def _render_request_type_selector(session):
     """Render request type selectbox and look up the corresponding profile_id.
 
@@ -950,30 +967,36 @@ def forms():
                         sanitize_for_user(e, default="Adjuntos no procesados.")
                     )
 
-            _save_to_sheets(
-                request_id=request_id,
-                tipo_solicitud=tipo_solicitud,
-                company_name=company_name,
-                email=company_info["email"],
-                trading=company_info["trading"],
-                location=company_info["location"],
-                language=company_info["language"],
-                reminder_frequency=company_info["reminder_frequency"],
-                requested_by=requested_by,
-                requested_by_type=requested_by_type,
-                tipo_operacion=client_data.get("tipo_operacion"),
-                commodity=client_data.get("commodity"),
-                aduana=client_data.get("aduana", False),
-                tipo_aduana=client_data.get("tipo_aduana", []),
-                puerto=client_data.get("puerto", False),
-                terminales_seleccionados=client_data.get(
-                    "terminales_seleccionados", {}
-                ),
-                linea_naviera=client_data.get("linea_naviera", False),
-                tipo_linea=client_data.get("tipo_linea", []),
-                datos_msc=client_data.get("datos_msc", {}),
-                case_id=_case_id,
-            )
+            if _is_sheets_enabled():
+                _save_to_sheets(
+                    request_id=request_id,
+                    tipo_solicitud=tipo_solicitud,
+                    company_name=company_name,
+                    email=company_info["email"],
+                    trading=company_info["trading"],
+                    location=company_info["location"],
+                    language=company_info["language"],
+                    reminder_frequency=company_info["reminder_frequency"],
+                    requested_by=requested_by,
+                    requested_by_type=requested_by_type,
+                    tipo_operacion=client_data.get("tipo_operacion"),
+                    commodity=client_data.get("commodity"),
+                    aduana=client_data.get("aduana", False),
+                    tipo_aduana=client_data.get("tipo_aduana", []),
+                    puerto=client_data.get("puerto", False),
+                    terminales_seleccionados=client_data.get(
+                        "terminales_seleccionados", {}
+                    ),
+                    linea_naviera=client_data.get("linea_naviera", False),
+                    tipo_linea=client_data.get("tipo_linea", []),
+                    datos_msc=client_data.get("datos_msc", {}),
+                    case_id=_case_id,
+                )
+            else:
+                logger.info(
+                    "Google Sheets sync disabled (st.secrets['sheets']['enabled'] falsy)",
+                    extra={"case_id": _case_id, "request_id": request_id},
+                )
 
             # Phase 8: send compliance notification email (best-effort).
             # Local import keeps the hot path clean and avoids pulling SMTP
