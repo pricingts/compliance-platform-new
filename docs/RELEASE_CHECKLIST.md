@@ -236,3 +236,152 @@ Only do this if you are sure the column / row is truly the cause.
 - **CRUDs retrofit to `transactional_session`**: deferred to keep this
   release small. Tracking under "Fase 4b future".
 - **`forms/my_requests_view.py:63` latent bug**: fixed in commit `fade678`.
+
+---
+
+## Phase 8 — Gmail API transport (From = usuario real + threading)
+
+Shipped on top of the base release:
+
+- Gmail API client with Domain-Wide Delegation (`services/mailer/gmail_client.py`).
+- Transport router: `st.secrets["mailer"]["transport"]` = `"smtp"` (default) or `"gmail"`.
+- New table `email_threads` (migration 007) persists `gmail_thread_id` +
+  `last_message_id` + `references_chain` per request so subsequent events
+  (reminders, status changes) thread into the same Gmail conversation.
+- Banner "Enviado por X en nombre de Y" when Inside Sales submits on behalf
+  of a comercial.
+- When `transport="gmail"`: the creator is removed from CC (already in From).
+- New exception `DelegationError(MailerError)` for 401/403 from Gmail API
+  with actionable message pointing to Admin Console.
+
+Total tests with Phase 8: **441** (vs. 392 pre-Phase-8 — +49 new).
+
+### Pre-flight — one-time Google Workspace setup (operator action)
+
+In [https://admin.google.com](https://admin.google.com) as a Super Admin of
+`tradingsolutions.com`:
+
+1. **Security → Access and data control → API controls → Manage Domain-Wide Delegation**.
+2. Click **Add new**.
+3. **Client ID**: the `client_id` field inside the service-account JSON you
+   already use for Drive/Sheets. You can read it from Streamlit Cloud →
+   Settings → Secrets under `google_sheets_credentials.client_id`, or from
+   the original JSON file on your machine.
+4. **OAuth scopes** — add (do NOT replace the existing list):
+   ```
+   https://www.googleapis.com/auth/gmail.send
+   ```
+5. Save. Propagation typically takes 5–10 minutes.
+
+No new account is created. No additional Workspace license is consumed.
+The service account gains delegated `gmail.send` permission only for users
+in the `tradingsolutions.com` domain.
+
+### Apply migration 007 to Postgres dev + production
+
+```bash
+# dev
+railway environment dev
+railway service Postgres-VuzG
+railway run --no-local python3 migrations/run_migration.py migrations/007_email_threads.sql
+
+# production (aditive, safe)
+railway environment production
+railway service Postgres
+railway run --no-local python3 migrations/run_migration.py migrations/007_email_threads.sql
+```
+
+Already applied in both environments during Phase 8 rollout.
+
+### Smoke test against Gmail API in dev
+
+The script `scripts/smoke_test_mailer_gmail_dev.py` exercises the full
+pipeline end-to-end: DWD impersonation, real Gmail API send, threadId
+persistence, idempotency.
+
+Run **after** DWD is approved and propagated:
+
+```bash
+cd /path/to/compliance-platform-new
+railway environment dev
+railway service Postgres-VuzG
+
+# Paste the service-account JSON as a single line into this env var.
+# The easiest way: copy the JSON from Streamlit Cloud secrets
+# (google_sheets_credentials section) and inline it.
+export GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type":"service_account",...}'
+
+# Optional: impersonate a different user (default jsanchez@tradingsolutions.com).
+# export SMOKE_IMPERSONATE_USER=lbandera@tradingsolutions.com
+
+railway run --no-local python3 scripts/smoke_test_mailer_gmail_dev.py
+```
+
+Expected output (tail):
+
+```
+[smoke-gmail] Invoking send_request_notification (real Gmail API, impersonating jsanchez@tradingsolutions.com)...
+[smoke-gmail]   first call returned: True (expected True)
+[smoke-gmail]   email_notified_at = datetime.datetime(...)  (expected NOT NULL)
+[smoke-gmail]   gmail_thread_id   = 'thread-xyz'             (expected NOT NULL)
+[smoke-gmail]   last_message_id   = '<case-C-GMAIL-SMOKE-creation@compliance.tradingsolutions.com>'
+[smoke-gmail]   references_chain  = None
+[smoke-gmail] Invoking again to confirm idempotency...
+[smoke-gmail]   second call returned: False (expected False)
+[smoke-gmail] SMOKE PASSED — Gmail API + DWD + threading operational
+[smoke-gmail]   cleaned up throw-away request + thread row
+```
+
+If you see `DelegationError: Gmail API rejected impersonation for ...`:
+DWD is not yet propagated or the scope was not added. Wait 10 minutes
+and retry; if it persists, re-check step 4 above.
+
+### Activate Gmail transport in Streamlit Cloud
+
+After the smoke passes:
+
+**dev app** → Settings → Secrets, set:
+
+```toml
+[mailer]
+enabled = true
+transport = "gmail"
+```
+
+(Remove the `[smtp]` block; it's no longer used when `transport="gmail"`.)
+
+Streamlit reloads. Create a test request as any comercial/IS user — the
+`From:` of the email will be their address, and the message appears in
+their own Sent folder.
+
+**production app** stays on `transport = "smtp"` (or unset → SMTP default)
+until dev has run for 2–3 days with zero incidents. Then flip prod the
+same way.
+
+### Rollback (Phase 8 specific)
+
+Instant rollback to SMTP: flip `transport = "smtp"` in secrets (or remove
+the key entirely — SMTP is the default). Takes effect on the next
+Streamlit reload, no redeploy needed.
+
+If the DWD approval needs to be revoked (revoke impersonation entirely):
+remove the scope from the DWD client in Admin Console. Subsequent Gmail
+sends will fail with `DelegationError`; `transport="smtp"` is the recovery
+path.
+
+### Observed behavior — Inside Sales
+
+When `submitted_by_email` ≠ `creator_email`:
+
+- From: IS (the person in front of the keyboard at submit time).
+- Cc: the comercial (`submitted_by_email`). They receive the original
+  notification and are on the thread for all replies.
+- HTML body: banner "Enviado por &lt;creator&gt; en nombre de
+  &lt;submitted_by&gt;" above the fields table.
+
+When they are equal (a comercial submitting their own request):
+
+- From: the comercial.
+- No "on behalf of" banner.
+- Cc: the compliance team dynamic/hardcoded list (creator excluded
+  because they are already From).
