@@ -11,6 +11,7 @@ so callers can reuse the same dict they already assemble for the Google Sheet.
 from __future__ import annotations
 
 import html
+from typing import Optional
 
 
 # Ordered list of (payload_key, display_label). Mirrors the Sheets column set
@@ -49,7 +50,43 @@ def _row(label: str, value) -> str:
     )
 
 
-def render_request_email(case_id: str, payload: dict) -> tuple[str, str]:
+def _render_sender_banner(
+    creator_email: Optional[str], submitted_by_email: Optional[str]
+) -> str:
+    """Return a highlighted banner disclosing the IS → comercial relay.
+
+    Rendered only when ``submitted_by_email`` is set AND differs from
+    ``creator_email`` after normalizing (``lower().strip()``). Returns an
+    empty string in all other cases so callers can concatenate blindly.
+
+    Both addresses are HTML-escaped (XSS-safe).
+    """
+    if not submitted_by_email:
+        return ""
+    creator_norm = (creator_email or "").strip().lower()
+    submitted_norm = submitted_by_email.strip().lower()
+    if not submitted_norm or submitted_norm == creator_norm:
+        return ""
+
+    creator_disp = html.escape(creator_email or "")
+    submitted_disp = html.escape(submitted_by_email)
+    return (
+        '<div class="sender-banner" style="background-color:#fff3cd; '
+        'border-left:4px solid #ffc107; padding:10px; margin-bottom:12px; '
+        'font-size:0.95rem;">'
+        f'<strong>Enviado por:</strong> {creator_disp}<br>'
+        f'<strong>En nombre de:</strong> {submitted_disp}'
+        '</div>'
+    )
+
+
+def render_request_email(
+    case_id: str,
+    payload: dict,
+    *,
+    creator_email: Optional[str] = None,
+    submitted_by_email: Optional[str] = None,
+) -> tuple[str, str]:
     """Render subject + HTML body for a new-request notification.
 
     Args:
@@ -57,6 +94,12 @@ def render_request_email(case_id: str, payload: dict) -> tuple[str, str]:
         payload: A dict of request fields. Keys that match ``_FIELD_MAP`` are
             rendered in a fixed order; empty values are omitted. Unknown keys
             are silently ignored.
+        creator_email: Optional email of the form author. Combined with
+            ``submitted_by_email`` to render an "Enviado por / En nombre de"
+            banner when the two differ (Inside Sales creating on behalf of a
+            comercial).
+        submitted_by_email: Optional email of the person on whose behalf the
+            form was submitted. See ``creator_email``.
 
     Returns:
         Tuple ``(subject, html_body)``.
@@ -73,6 +116,7 @@ def render_request_email(case_id: str, payload: dict) -> tuple[str, str]:
     rows_html = "".join(rows)
 
     escaped_case_id = html.escape(case_id)
+    sender_banner = _render_sender_banner(creator_email, submitted_by_email)
 
     html_body = f"""<html><head><style>
 body {{ font-family: Arial, sans-serif; color: #333; }}
@@ -85,7 +129,7 @@ tr:nth-child(even) {{ background-color: #fafafa; }}
 .footer {{ margin-top: 1rem; font-size: 0.9rem; color: #666; }}
 </style></head><body>
 <h2>NEW REQUEST</h2>
-<div class="case-banner"><strong>Case ID:</strong> {escaped_case_id}</div>
+{sender_banner}<div class="case-banner"><strong>Case ID:</strong> {escaped_case_id}</div>
 <table>{rows_html}</table>
 <p class="footer">Please review the information above.<br><em>Automated message from Compliance Platform</em></p>
 </body></html>"""

@@ -311,3 +311,66 @@ class TestRouterDispatch:
         assert row is not None
         assert row[0] is None
         assert row[1] == "<case-C0804-creation@compliance.tradingsolutions.com>"
+
+    def test_gmail_transport_excludes_creator_from_cc(
+        self, db_session, seed_profiles, mock_smtp, monkeypatch
+    ):
+        """Phase 8.3: when transport=gmail, creator is From, so it must
+        NOT appear in CC. submitted_by_email stays in CC."""
+        from services.mailer import send_request_notification
+        import services.mailer.gmail_client as gmail_client
+
+        mock_smtp["secrets"]["mailer"] = {
+            "enabled": True,
+            "transport": "gmail",
+        }
+
+        _seed_request(db_session, seed_profiles, case_id="C0805")
+
+        gmail_send = MagicMock(
+            return_value={
+                "id": "gmail-msg-x",
+                "threadId": "gmail-thread-x",
+                "labelIds": ["SENT"],
+            }
+        )
+        monkeypatch.setattr(gmail_client, "send_email", gmail_send)
+
+        send_request_notification(
+            session=db_session,
+            case_id="C0805",
+            payload={"company_name": "Router Test"},
+            creator_email="creator@tradingsolutions.com",
+            submitted_by_email="comercial@tradingsolutions.com",
+        )
+
+        assert gmail_send.called
+        _, kwargs = gmail_send.call_args
+        cc = kwargs["cc"] or []
+        cc_lower = [e.lower() for e in cc]
+        # Creator is the From — must NOT be in CC.
+        assert "creator@tradingsolutions.com" not in cc_lower
+        # Submitted-by must still be in CC.
+        assert "comercial@tradingsolutions.com" in cc_lower
+
+    def test_smtp_transport_keeps_creator_in_cc(
+        self, db_session, seed_profiles, mock_smtp
+    ):
+        """Pre-Phase-8.3 behavior on SMTP: creator stays in CC
+        (because SMTP uses a shared From header, not the creator)."""
+        from services.mailer import send_request_notification
+
+        _seed_request(db_session, seed_profiles, case_id="C0806")
+
+        send_request_notification(
+            session=db_session,
+            case_id="C0806",
+            payload={"company_name": "Router Test"},
+            creator_email="creator@tradingsolutions.com",
+            submitted_by_email="comercial@tradingsolutions.com",
+        )
+
+        sent_msg = mock_smtp["instance_ssl"].send_message.call_args[0][0]
+        cc_header = sent_msg["Cc"] or ""
+        assert "creator@tradingsolutions.com" in cc_header
+        assert "comercial@tradingsolutions.com" in cc_header

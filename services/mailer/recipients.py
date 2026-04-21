@@ -52,6 +52,8 @@ def resolve_recipients(
     session: Session,
     creator_email: Optional[str],
     submitted_by_email: Optional[str] = None,
+    *,
+    exclude_creator_from_cc: bool = False,
 ) -> dict:
     """Resolve TO / CC addresses for a new-request notification.
 
@@ -61,6 +63,11 @@ def resolve_recipients(
         submitted_by_email: Address of the user who physically submitted the
             form (only different from creator_email when Inside Sales creates
             on behalf of a comercial).
+        exclude_creator_from_cc: When True (e.g. when the transport will send
+            with ``From = creator_email``, as the Gmail transport does), the
+            creator is removed from CC to avoid appearing twice in the email
+            (once as From and once as CC). Default ``False`` preserves the
+            pre-Phase-8.3 behavior where the creator is always in CC.
 
     Returns:
         ``{"to": [...], "cc": [...]}``. Both lists are sorted. If no
@@ -105,12 +112,17 @@ def resolve_recipients(
 
     # ---- Build CC -------------------------------------------------------
     to_lower_set = {e.lower() for e in to_list}
+    creator_norm = _normalize(creator_email)
     cc_map: dict[str, str] = {}
     for addr in (creator_email, submitted_by_email):
         normalized = _normalize(addr)
         if not normalized:
             continue
         if normalized in to_lower_set:
+            continue
+        if exclude_creator_from_cc and creator_norm and normalized == creator_norm:
+            # Creator is already going to be the From of the Gmail message;
+            # leaving it in CC would show up twice in the recipient's client.
             continue
         cc_map.setdefault(normalized, normalized)
 

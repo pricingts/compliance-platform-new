@@ -117,3 +117,77 @@ class TestRenderRequestEmail:
 
         _, html_body = render_request_email("C0042", {"company_name": "X"})
         assert "Compliance Platform" in html_body
+
+
+class TestInsideSalesBanner:
+    """Phase 8.3: when an Inside Sales submits on behalf of a comercial
+    (submitted_by_email != creator_email), the email must include a banner
+    disclosing who submitted and on whose behalf."""
+
+    def test_render_includes_is_banner_when_submitted_by_differs(self):
+        from services.mailer.templates import render_request_email
+
+        _, html_body = render_request_email(
+            "C0042",
+            {"company_name": "Acme Corp"},
+            creator_email="is@tradingsolutions.com",
+            submitted_by_email="comercial@tradingsolutions.com",
+        )
+        assert "sender-banner" in html_body
+        assert "Enviado por:" in html_body
+        assert "En nombre de:" in html_body
+        assert "is@tradingsolutions.com" in html_body
+        assert "comercial@tradingsolutions.com" in html_body
+
+    def test_render_omits_is_banner_when_submitted_by_equals_creator(self):
+        from services.mailer.templates import render_request_email
+
+        _, html_body = render_request_email(
+            "C0042",
+            {"company_name": "Acme Corp"},
+            creator_email="pedro@tradingsolutions.com",
+            submitted_by_email="PEDRO@tradingsolutions.com",  # case-insensitive
+        )
+        assert "sender-banner" not in html_body
+        assert "Enviado por:" not in html_body
+        assert "En nombre de:" not in html_body
+
+    def test_render_omits_is_banner_when_submitted_by_is_none(self):
+        from services.mailer.templates import render_request_email
+
+        _, html_body = render_request_email(
+            "C0042",
+            {"company_name": "Acme Corp"},
+            creator_email="pedro@tradingsolutions.com",
+            submitted_by_email=None,
+        )
+        assert "sender-banner" not in html_body
+        assert "Enviado por:" not in html_body
+
+    def test_render_omits_is_banner_when_creator_and_submitted_by_both_none(self):
+        """Backward-compat: calling render_request_email without the new
+        kwargs must behave exactly like before and not emit the banner."""
+        from services.mailer.templates import render_request_email
+
+        _, html_body = render_request_email(
+            "C0042",
+            {"company_name": "Acme Corp"},
+        )
+        assert "sender-banner" not in html_body
+        assert "Enviado por:" not in html_body
+
+    def test_render_escapes_creator_and_submitted_by_for_xss(self):
+        """Addresses in the banner must be HTML-escaped — no raw <script>."""
+        from services.mailer.templates import render_request_email
+
+        _, html_body = render_request_email(
+            "C0042",
+            {"company_name": "Acme Corp"},
+            creator_email="<script>alert('xss')</script>",
+            submitted_by_email="<img src=x onerror=alert(1)>",
+        )
+        assert "<script>alert('xss')</script>" not in html_body
+        assert "<img src=x onerror=alert(1)>" not in html_body
+        # Escaped form must be present instead.
+        assert "&lt;script&gt;" in html_body
+        assert "&lt;img src=x onerror=alert(1)&gt;" in html_body

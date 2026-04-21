@@ -179,10 +179,16 @@ def send_request_notification(
         )
         return False
 
+    # Resolve transport first — its value decides whether creator should be
+    # removed from CC (creator is From when transport == 'gmail', so having
+    # them in CC too would double up in the recipient's client).
+    transport = _resolve_transport()
+
     recipients = resolve_recipients(
         session=session,
         creator_email=creator_email,
         submitted_by_email=submitted_by_email,
+        exclude_creator_from_cc=(transport == "gmail"),
     )
     if not recipients["to"]:
         logger.error(
@@ -191,10 +197,14 @@ def send_request_notification(
         )
         return False
 
-    subject, html_body = render_request_email(case_id, payload)
+    subject, html_body = render_request_email(
+        case_id,
+        payload,
+        creator_email=creator_email,
+        submitted_by_email=submitted_by_email,
+    )
     message_id = _build_message_id(case_id)
 
-    transport = _resolve_transport()
     references, in_reply_to, thread_id = _build_threading_headers(
         session, request_id
     )
