@@ -16,6 +16,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 DB_PATH = Path(__file__).parent.parent / "local_dev.db"
 SUPER_ADMIN_EMAIL = "jsanchez@tradingsolutions.com"
 
@@ -78,28 +82,28 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
 
 def main() -> int:
     if not DB_PATH.exists():
-        print(f"ERROR: {DB_PATH} does not exist — run the app once or init the DB first.")
+        logger.error("%s does not exist — run the app once or init the DB first.", DB_PATH)
         return 1
 
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys=ON")
     cur = conn.cursor()
 
-    print(f"Applying migration 003 (SQLite) to {DB_PATH}…")
+    logger.info("Applying migration 003 (SQLite) to %s...", DB_PATH)
 
     # 1. New tables
     for sql in SCHEMA_STATEMENTS:
         cur.execute(sql)
     conn.commit()
-    print("  ✓ new tables created")
+    logger.info("  new tables created")
 
     # 2. New columns on requests
     for col_name, col_type in NEW_REQUEST_COLUMNS:
         if not _column_exists(conn, "requests", col_name):
             cur.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
-            print(f"  ✓ requests.{col_name} added")
+            logger.info("  requests.%s added", col_name)
         else:
-            print(f"  · requests.{col_name} already present")
+            logger.info("  requests.%s already present", col_name)
     conn.commit()
 
     # 3. Backfill case_id for existing rows
@@ -109,7 +113,7 @@ def main() -> int:
          WHERE case_id IS NULL
     """)
     conn.commit()
-    print(f"  ✓ case_id backfilled for {cur.rowcount} rows")
+    logger.info("  case_id backfilled for %s rows", cur.rowcount)
 
     # 4. Unique index for case_id (partial; SQLite supports this since 3.8)
     cur.execute("""
@@ -117,7 +121,7 @@ def main() -> int:
                   ON requests(case_id) WHERE case_id IS NOT NULL
     """)
     conn.commit()
-    print("  ✓ unique index on case_id ensured")
+    logger.info("  unique index on case_id ensured")
 
     # 5. Seed super-admin
     cur.execute(
@@ -132,26 +136,26 @@ def main() -> int:
         (SUPER_ADMIN_EMAIL,),
     )
     conn.commit()
-    print(f"  ✓ super-admin seeded: {SUPER_ADMIN_EMAIL}")
+    logger.info("  super-admin seeded: %s", SUPER_ADMIN_EMAIL)
 
     # Verify
     row = cur.execute(
         "SELECT email, rol, activo FROM users WHERE email=?", (SUPER_ADMIN_EMAIL,)
     ).fetchone()
-    print(f"\nVerification: users row = {row}")
+    logger.info("Verification: users row = %s", row)
 
     counts = {}
     for t in ("users", "inside_sales_comerciales", "request_attachments", "reminder_schedule"):
         counts[t] = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-    print(f"Table counts: {counts}")
+    logger.info("Table counts: %s", counts)
 
     null_case_ids = cur.execute(
         "SELECT COUNT(*) FROM requests WHERE case_id IS NULL"
     ).fetchone()[0]
-    print(f"Requests with NULL case_id: {null_case_ids}")
+    logger.info("Requests with NULL case_id: %s", null_case_ids)
 
     conn.close()
-    print("\nMigration 003 (SQLite) complete.")
+    logger.info("Migration 003 (SQLite) complete.")
     return 0
 
 

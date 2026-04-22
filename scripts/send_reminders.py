@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import sys
 
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def main() -> int:
     from database.db import SessionLocal
@@ -19,7 +23,7 @@ def main() -> int:
     session = SessionLocal()
     try:
         n = process_due_reminders(session)
-        print(f"Reminders processed: {n}")
+        logger.info("Reminders processed: %s", n)
         return 0
     finally:
         session.close()

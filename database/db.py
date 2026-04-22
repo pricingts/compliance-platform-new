@@ -10,7 +10,10 @@ def _get_database_url() -> str:
     try:
         import streamlit as st
         return st.secrets["DATABASE_URL"]
-    except Exception:
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):
+        # Streamlit missing, secrets file missing, or DATABASE_URL not in
+        # secrets — fall through to env/.env. Narrower catches here would
+        # miss Streamlit's internal exceptions when running outside the app.
         from dotenv import load_dotenv
         load_dotenv()
 

@@ -8,20 +8,26 @@ Workflow:
 2. Find all due reminders (enabled, next_reminder_at <= NOW(), not expired).
 3. For each due: insert in-app notifications for the request owner AND
    the submitter (if different); advance next_reminder_at by frequency_days.
+
+Phase 5 hardening: the catch-alls were narrowed to
+:class:`sqlalchemy.exc.SQLAlchemyError`. Programming bugs (``KeyError``,
+``TypeError``, etc.) are no longer silenced — they propagate so CI can
+surface them instead of losing reminders quietly.
 """
 from __future__ import annotations
 
 from datetime import timedelta
 from typing import Optional
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from database.crud.documents import insert_notification
 from database.crud.reminders import (
+    advance_reminder,
     disable_expired_reminders,
     get_due_reminders,
-    advance_reminder,
 )
-from database.crud.documents import insert_notification
 from services.logging_config import get_logger
 from utils.timezone import utc_now
 
@@ -40,12 +46,12 @@ def process_due_reminders(session: Session, current_user_email: Optional[str] = 
     now = utc_now()
     try:
         disable_expired_reminders(session, now=now)
-    except Exception:
+    except SQLAlchemyError:
         logger.exception("Failed to disable expired reminders")
 
     try:
         due = get_due_reminders(session, now=now)
-    except Exception:
+    except SQLAlchemyError:
         logger.exception("Failed to fetch due reminders")
         return 0
 
@@ -74,15 +80,21 @@ def process_due_reminders(session: Session, current_user_email: Optional[str] = 
                     request_id=r["request_id"],
                     message=message,
                 )
-            except Exception:
-                logger.exception("Failed to insert reminder notification", extra={"to": email})
+            except SQLAlchemyError:
+                logger.exception(
+                    "Failed to insert reminder notification",
+                    extra={"to": email},
+                )
 
         # Advance next_reminder_at = now + frequency_days
         try:
             new_next = now + timedelta(days=r["frequency_days"])
             advance_reminder(session, schedule_id=r["id"], new_next_at=new_next)
-        except Exception:
-            logger.exception("Failed to advance reminder", extra={"sched_id": r["id"]})
+        except SQLAlchemyError:
+            logger.exception(
+                "Failed to advance reminder",
+                extra={"sched_id": r["id"]},
+            )
 
         processed += 1
 

@@ -23,6 +23,10 @@ from pathlib import Path
 import sqlalchemy
 from sqlalchemy import text
 
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 MIGRATION_SQL_PATH = Path(__file__).parent / "003_users_admin_and_enhancements.sql"
 SEED_SQL_PATH = Path(__file__).parent / "seed_super_admin.sql"
 
@@ -74,22 +78,24 @@ def run() -> None:
     database_url = _get_database_url()
     engine = sqlalchemy.create_engine(database_url)
 
-    print(f"Applying migration 003 from {MIGRATION_SQL_PATH.name}...")
+    logger.info("Applying migration 003 from %s...", MIGRATION_SQL_PATH.name)
     _execute_sql_file(engine, MIGRATION_SQL_PATH)
-    print("Migration 003 applied.")
+    logger.info("Migration 003 applied.")
 
     if SEED_SQL_PATH.exists():
-        print(f"Applying seed {SEED_SQL_PATH.name}...")
+        logger.info("Applying seed %s...", SEED_SQL_PATH.name)
         _execute_sql_file(engine, SEED_SQL_PATH)
-        print("Seed applied.")
+        logger.info("Seed applied.")
     else:
-        print(f"WARN: seed file {SEED_SQL_PATH.name} not found — skipping super-admin seed.")
+        logger.warning(
+            "seed file %s not found — skipping super-admin seed.", SEED_SQL_PATH.name
+        )
 
     # Verify new tables/columns exist
     with engine.connect() as conn:
         for table in ["users", "inside_sales_comerciales", "request_attachments", "reminder_schedule"]:
             count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
-            print(f"  {table}: {count} rows")
+            logger.info("  %s: %s rows", table, count)
 
         new_cols = conn.execute(text("""
             SELECT column_name FROM information_schema.columns
@@ -97,12 +103,12 @@ def run() -> None:
                AND column_name IN ('submitted_by_email','notes','case_id','reminder_max_months')
              ORDER BY column_name
         """)).fetchall()
-        print(f"  requests new columns: {[r[0] for r in new_cols]}")
+        logger.info("  requests new columns: %s", [r[0] for r in new_cols])
 
         null_case_ids = conn.execute(text(
             "SELECT COUNT(*) FROM requests WHERE case_id IS NULL"
         )).scalar()
-        print(f"  requests with NULL case_id (should be 0): {null_case_ids}")
+        logger.info("  requests with NULL case_id (should be 0): %s", null_case_ids)
 
 
 if __name__ == "__main__":

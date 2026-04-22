@@ -58,7 +58,18 @@ CREATE TABLE IF NOT EXISTS requests (
     submitted_by_email VARCHAR(255),
     notes TEXT,
     case_id VARCHAR(10) UNIQUE,
-    reminder_max_months INTEGER
+    reminder_max_months INTEGER,
+    email_notified_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL UNIQUE REFERENCES requests(id) ON DELETE CASCADE,
+    gmail_thread_id VARCHAR(255),
+    last_message_id VARCHAR(512),
+    references_chain TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS comments (
@@ -381,3 +392,74 @@ def mock_google_sheets():
     client.open_by_key.return_value = mock_spreadsheet
 
     return client
+
+
+# ---------------------------------------------------------------------------
+# SMTP mock for the mailer service (Phase 2)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_smtp(monkeypatch, mock_streamlit):
+    """Mock smtplib.SMTP_SSL and smtplib.SMTP for tests that exercise the mailer.
+
+    Returns a dict with:
+        - ``ssl``: the MagicMock replacing ``smtplib.SMTP_SSL``
+        - ``plain``: the MagicMock replacing ``smtplib.SMTP``
+        - ``instance_ssl``: the instance returned by ``smtplib.SMTP_SSL(...)``
+        - ``instance_plain``: the instance returned by ``smtplib.SMTP(...)``
+
+    Both classes support the context-manager protocol so
+    ``with smtplib.SMTP_SSL(...) as smtp: smtp.send_message(...)`` works.
+
+    Also injects ``st.secrets['smtp']`` and ``st.secrets['mailer']`` with
+    sensible defaults so mailer code can read them without crashing.
+    """
+    import smtplib
+
+    def _make_instance():
+        inst = MagicMock()
+        inst.__enter__ = MagicMock(return_value=inst)
+        inst.__exit__ = MagicMock(return_value=False)
+        return inst
+
+    instance_ssl = _make_instance()
+    instance_plain = _make_instance()
+
+    mock_ssl_cls = MagicMock(return_value=instance_ssl)
+    mock_plain_cls = MagicMock(return_value=instance_plain)
+
+    monkeypatch.setattr(smtplib, "SMTP_SSL", mock_ssl_cls)
+    monkeypatch.setattr(smtplib, "SMTP", mock_plain_cls)
+
+    # Populate st.secrets with SMTP + mailer config defaults.
+    secrets = mock_streamlit["secrets"]
+    secrets["smtp"] = {
+        "host": "smtp.example.com",
+        "port": 465,
+        "username": "mailer@tradingsolutions.com",
+        "password": "secret",
+        "use_tls": False,
+        "from_addr": "mailer@tradingsolutions.com",
+    }
+    secrets["mailer"] = {"enabled": True}
+
+    return {
+        "ssl": mock_ssl_cls,
+        "plain": mock_plain_cls,
+        "instance_ssl": instance_ssl,
+        "instance_plain": instance_plain,
+        "secrets": secrets,
+    }
+
+
+@pytest.fixture
+def mock_mailer(monkeypatch):
+    """Replace services.mailer.send_request_notification with a MagicMock.
+
+    Useful for tests that exercise forms/views which trigger notifications
+    but should not actually touch SMTP code.
+    """
+    mock = MagicMock(return_value=True)
+    # Patch the function where it's looked up from the package root.
+    monkeypatch.setattr("services.mailer.send_request_notification", mock)
+    return mock

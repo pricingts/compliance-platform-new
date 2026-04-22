@@ -1,6 +1,8 @@
 """Tests for health check endpoint."""
 from unittest.mock import patch, MagicMock
 
+from sqlalchemy.exc import OperationalError
+
 
 class TestHealthCheck:
     def test_check_db_connection_success(self):
@@ -17,11 +19,17 @@ class TestHealthCheck:
             assert check_db() is True
 
     def test_check_db_connection_failure(self):
-        """check_db should return False when DB is unreachable."""
+        """check_db should return False when DB is unreachable.
+
+        We raise ``OperationalError`` (a ``SQLAlchemyError`` subclass) because
+        that's the realistic failure mode for ``engine.connect()``.
+        """
         from healthcheck import check_db
 
         mock_engine = MagicMock()
-        mock_engine.connect.side_effect = Exception("Connection refused")
+        mock_engine.connect.side_effect = OperationalError(
+            "SELECT 1", {}, Exception("Connection refused")
+        )
 
         with patch("healthcheck._get_engine", return_value=mock_engine):
             assert check_db() is False

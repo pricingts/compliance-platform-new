@@ -1,4 +1,7 @@
 import streamlit as st
+from googleapiclient.errors import HttpError
+from gspread.exceptions import GSpreadException
+from sqlalchemy.exc import SQLAlchemyError
 from database.db import SessionLocal
 from database.crud.clientes import (
     insert_client_request,
@@ -10,7 +13,8 @@ from database.crud.clientes import (
 from services.sheets_writer import save_request
 from services.audit import log_action
 from services.logging_config import get_logger
-from utils.error_handlers import handle_error
+from utils.error_handlers import handle_error, sanitize_for_user
+from utils.exceptions import DriveUploadError, MailerError, SheetsError
 from utils.ui_helpers import render_section_header
 from utils.validators import validate_email, sanitize_company_name
 from config.constants import (
@@ -31,6 +35,23 @@ from config.constants import (
 logger = get_logger(__name__)
 
 
+def _is_sheets_enabled() -> bool:
+    """Return True iff ``st.secrets['sheets']['enabled']`` is truthy.
+
+    Default-off: once the Python mailer is handling notifications, the
+    legacy Google Sheet write-through is redundant (and keeps the Apps
+    Script notifier alive, duplicating the email). Operators can flip the
+    flag back on to re-enable the Sheet for auditing or rollback.
+    """
+    try:
+        cfg = st.secrets.get("sheets") if hasattr(st, "secrets") else None
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):
+        return False
+    if not cfg:
+        return False
+    return bool(cfg.get("enabled", False))
+
+
 def _render_request_type_selector(session):
     """Render request type selectbox and look up the corresponding profile_id.
 
@@ -45,7 +66,7 @@ def _render_request_type_selector(session):
 
     try:
         profile_id = get_profile_id(session, tipo_solicitud)
-    except Exception as e:
+    except SQLAlchemyError as e:
         session.close()
         handle_error(e, "Error al conectar con la base de datos.")
         return None, None
@@ -421,9 +442,14 @@ def _upload_attachments_to_drive(
         attachments_folder_id = find_or_create_subfolder(
             service, company_folder_id, "Adjuntos Solicitud",
         )
-    except Exception as e:
+    except (HttpError, OSError, DriveUploadError) as e:
         logger.error("Failed to ensure attachments subfolder", extra={"error": str(e)})
-        st.warning(f"No se pudo crear la carpeta de adjuntos en Drive: {e}")
+        st.warning(
+            sanitize_for_user(
+                e,
+                default="No se pudo crear la carpeta de adjuntos en Drive.",
+            )
+        )
         return results
 
     for f in files:
@@ -445,9 +471,14 @@ def _upload_attachments_to_drive(
                 except OSError:
                     pass
             results.append({"file_name": safe_name, "drive_link": drive_link})
-        except Exception as e:
+        except (HttpError, OSError, DriveUploadError) as e:
             logger.error("Attachment upload failed", extra={"file": safe_name, "error": str(e)})
-            st.warning(f"Fallo subiendo {safe_name}: {e}")
+            st.warning(
+                sanitize_for_user(
+                    e,
+                    default=f"Fallo subiendo {safe_name}.",
+                )
+            )
     return results
 
 
@@ -575,18 +606,21 @@ def _save_request_to_db(
                     details=f"Request #{request_id}: {company_name}",
                 )
                 session.commit()
-            except Exception:
+            except SQLAlchemyError:
                 logger.warning("Audit log failed for request creation", exc_info=True)
 
             return request_id
-        except Exception as e:
+        except SQLAlchemyError as e:
             session.rollback()
             session.close()
             logger.error(
                 "Failed to save request to database",
                 extra={"error": str(e)},
             )
-            handle_error(e, f"Error al guardar la solicitud: {e}")
+            handle_error(
+                e,
+                sanitize_for_user(e, default="Error al guardar la solicitud."),
+            )
             return None
 
 
@@ -610,12 +644,19 @@ def _save_to_sheets(
     linea_naviera,
     tipo_linea,
     datos_msc,
+    case_id=None,
 ):
-    """Sync the request to Google Sheets. Errors are logged but not fatal."""
+    """Sync the request to Google Sheets. Errors are logged but not fatal.
+
+    ``case_id`` is the human-friendly identifier (e.g. ``C0042``) derived
+    from the new ``requests.case_id`` column. Passed as the first column in
+    the sheet; defaults to empty string when not provided.
+    """
     try:
         save_request(
             {
                 "request_id": request_id,
+                "case_id": case_id or "",
                 "tipo_solicitud": tipo_solicitud,
                 "company_name": company_name,
                 "email": email,
@@ -679,11 +720,85 @@ def _save_to_sheets(
                 ),
             }
         )
-    except Exception as e:
+    except (HttpError, OSError, GSpreadException, SheetsError) as e:
         logger.error(
             "Failed to save request to Google Sheets",
             extra={"request_id": request_id, "error": str(e)},
         )
+
+
+def _build_email_payload(
+    case_id,
+    tipo_solicitud,
+    company_name,
+    company_info,
+    requested_by,
+    client_data,
+):
+    """Assemble the dict consumed by the mailer template.
+
+    Keys align with the snake_case ``_FIELD_MAP`` declared in
+    ``services/mailer/templates.py`` so the rendered email mirrors the row
+    written to Google Sheets (same column order and labels).
+
+    ``case_id`` and ``fecha`` are included as bookkeeping — the renderer
+    ignores them because they are not in ``_FIELD_MAP`` — but they keep the
+    payload self-describing for debugging / future use.
+
+    Missing or None inputs collapse to ``""`` (never ``None``) so the
+    template's ``_is_empty`` check works uniformly.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    company_info = company_info or {}
+    client_data = client_data or {}
+    co_tz = ZoneInfo("America/Bogota")
+
+    tipo_aduana = client_data.get("tipo_aduana") or []
+    aduana_flag = client_data.get("aduana")
+    if tipo_aduana:
+        aduana_value = ", ".join(tipo_aduana)
+    elif aduana_flag:
+        aduana_value = "Sí"
+    else:
+        aduana_value = ""
+
+    terminales = client_data.get("terminales_seleccionados") or {}
+    puerto_flag = client_data.get("puerto")
+    if terminales:
+        puerto_value = ", ".join(terminales.keys())
+    elif puerto_flag:
+        puerto_value = "Sí"
+    else:
+        puerto_value = ""
+
+    tipo_linea = client_data.get("tipo_linea") or []
+    linea_flag = client_data.get("linea_naviera")
+    if tipo_linea:
+        linea_value = ", ".join(tipo_linea)
+    elif linea_flag:
+        linea_value = "Sí"
+    else:
+        linea_value = ""
+
+    return {
+        "case_id": case_id or "",
+        "fecha": datetime.now(co_tz).strftime("%Y-%m-%d %H:%M:%S"),
+        "requested_by": requested_by or "",
+        "tipo_solicitud": tipo_solicitud or "",
+        "company_name": company_name or "",
+        "email": company_info.get("email") or "",
+        "trading": company_info.get("trading") or "",
+        "location": company_info.get("location") or "",
+        "language": company_info.get("language") or "",
+        "reminder_frequency": company_info.get("reminder_frequency") or "",
+        "tipo_operacion": client_data.get("tipo_operacion") or "",
+        "commodity": client_data.get("commodity") or "",
+        "aduana": aduana_value,
+        "puerto": puerto_value,
+        "linea_naviera": linea_value,
+    }
 
 
 def _get_current_user(session):
@@ -795,7 +910,7 @@ def forms():
                     frequency_days=company_info["reminder_frequency_days"],
                     max_months=company_info["reminder_max_months"],
                 )
-            except Exception:
+            except SQLAlchemyError:
                 logger.warning("Failed to create reminder schedule", exc_info=True)
 
             # Show case_id as proof of submission
@@ -842,42 +957,91 @@ def forms():
                                 details=f"{r['file_name']}",
                             )
                             session.commit()
-                        except Exception:
+                        except SQLAlchemyError:
                             logger.warning("Audit log failed for attachment", exc_info=True)
                     if upload_results:
                         st.success(f"Se subieron {len(upload_results)} adjunto(s) a Drive.")
-                except Exception as e:
+                except (HttpError, OSError, DriveUploadError, SQLAlchemyError, KeyError) as e:
                     logger.error("Attachment flow failed", extra={"error": str(e)})
-                    st.warning(f"Adjuntos no procesados: {e}")
+                    st.warning(
+                        sanitize_for_user(e, default="Adjuntos no procesados.")
+                    )
 
-            _save_to_sheets(
-                request_id=request_id,
-                tipo_solicitud=tipo_solicitud,
-                company_name=company_name,
-                email=company_info["email"],
-                trading=company_info["trading"],
-                location=company_info["location"],
-                language=company_info["language"],
-                reminder_frequency=company_info["reminder_frequency"],
-                requested_by=requested_by,
-                requested_by_type=requested_by_type,
-                tipo_operacion=client_data.get("tipo_operacion"),
-                commodity=client_data.get("commodity"),
-                aduana=client_data.get("aduana", False),
-                tipo_aduana=client_data.get("tipo_aduana", []),
-                puerto=client_data.get("puerto", False),
-                terminales_seleccionados=client_data.get(
-                    "terminales_seleccionados", {}
-                ),
-                linea_naviera=client_data.get("linea_naviera", False),
-                tipo_linea=client_data.get("tipo_linea", []),
-                datos_msc=client_data.get("datos_msc", {}),
-            )
+            if _is_sheets_enabled():
+                _save_to_sheets(
+                    request_id=request_id,
+                    tipo_solicitud=tipo_solicitud,
+                    company_name=company_name,
+                    email=company_info["email"],
+                    trading=company_info["trading"],
+                    location=company_info["location"],
+                    language=company_info["language"],
+                    reminder_frequency=company_info["reminder_frequency"],
+                    requested_by=requested_by,
+                    requested_by_type=requested_by_type,
+                    tipo_operacion=client_data.get("tipo_operacion"),
+                    commodity=client_data.get("commodity"),
+                    aduana=client_data.get("aduana", False),
+                    tipo_aduana=client_data.get("tipo_aduana", []),
+                    puerto=client_data.get("puerto", False),
+                    terminales_seleccionados=client_data.get(
+                        "terminales_seleccionados", {}
+                    ),
+                    linea_naviera=client_data.get("linea_naviera", False),
+                    tipo_linea=client_data.get("tipo_linea", []),
+                    datos_msc=client_data.get("datos_msc", {}),
+                    case_id=_case_id,
+                )
+            else:
+                logger.info(
+                    "Google Sheets sync disabled (st.secrets['sheets']['enabled'] falsy)",
+                    extra={"case_id": _case_id, "request_id": request_id},
+                )
+
+            # Phase 8: send compliance notification email (best-effort).
+            # Local import keeps the hot path clean and avoids pulling SMTP
+            # code into modules that never submit a form. NOTE: when
+            # st.secrets["mailer"]["enabled"] is True in production, the
+            # Apps Script notifier attached to the Google Sheet must be
+            # disabled to avoid duplicate emails to compliance.
+            try:
+                from services.mailer import send_request_notification
+                _payload = _build_email_payload(
+                    case_id=_case_id,
+                    tipo_solicitud=tipo_solicitud,
+                    company_name=company_name,
+                    company_info=company_info,
+                    requested_by=requested_by,
+                    client_data=client_data,
+                )
+                _creator_email = st.session_state.get("_user_email") or submitted_by_email
+                send_request_notification(
+                    session=session,
+                    case_id=_case_id,
+                    payload=_payload,
+                    creator_email=_creator_email,
+                    submitted_by_email=submitted_by_email,
+                )
+            except MailerError as e:
+                logger.error("Mailer failed for case %s", _case_id, exc_info=True)
+                st.warning(sanitize_for_user(e))
+            except Exception:  # intentional-broad: defensive — the request
+                # has already been persisted successfully at this point; we
+                # must never surface an unexpected error from the notification
+                # path that would make the user think saving failed.
+                logger.exception("Unexpected mailer error for case %s", _case_id)
+                st.warning(
+                    "Solicitud guardada. Hubo un problema notificando a compliance por correo."
+                )
 
             session.close()
             st.success("Solicitud guardada correctamente")
     finally:
+        # session.close() is best-effort cleanup in the finally path: we do not
+        # want a secondary failure during teardown (e.g. a stale/broken pool
+        # connection) to mask the original exception or crash the page. A
+        # broad except is intentional here.
         try:
             session.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - intentional best-effort teardown
             pass

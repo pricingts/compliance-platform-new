@@ -65,6 +65,16 @@ def get_active_comerciales(session: Session) -> list[dict[str, Any]]:
     return list_users(session, filter_rol="comercial", activo_only=True)
 
 
+def get_active_compliance_users(session: Session) -> list[dict[str, Any]]:
+    """Return active users with rol='compliance'.
+
+    Used by the mailer to dynamically discover compliance staff who should
+    receive new-request notifications in addition to the hardcoded compliance
+    shared mailboxes.
+    """
+    return list_users(session, filter_rol="compliance", activo_only=True)
+
+
 def get_comerciales_for_inside_sales(
     session: Session, inside_sales_email: Optional[str],
 ) -> list[dict[str, Any]]:
