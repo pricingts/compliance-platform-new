@@ -1,51 +1,43 @@
-"""Structural tests for migrations/008_seed_comerciales.sql.
+"""Tests for migration 007: adds ``email_threads`` table for Gmail threading.
 
-Verifies the SQL file exists, targets the users table, seeds the full
-roster with rol='comercial', and is idempotent (ON CONFLICT DO UPDATE).
+The table stores per-request Gmail threadId + Message-ID chain so subsequent
+events (reminders, status changes) thread into the same Gmail conversation.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-
-MIGRATION_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "migrations"
-    / "008_seed_comerciales.sql"
-)
+import pytest
 
 
-def test_migration_008_file_exists():
-    assert MIGRATION_PATH.exists(), f"missing {MIGRATION_PATH}"
+MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
 
-def test_migration_008_inserts_into_users():
-    sql = MIGRATION_PATH.read_text(encoding="utf-8")
-    assert "INSERT INTO users" in sql
+class TestMigration008SqlFile:
+    """Verify the migration SQL file exists and has the expected DDL."""
 
+    @pytest.fixture
+    def migration_sql(self):
+        path = MIGRATIONS_DIR / "008_email_threads.sql"
+        assert path.exists(), f"Migration file not found: {path}"
+        return path.read_text()
 
-def test_migration_008_contains_all_expected_emails():
-    sql = MIGRATION_PATH.read_text(encoding="utf-8")
-    expected_emails = [
-        "sales@tradingsolutions.com",
-        "sales2@tradingsolutions.com",
-        "sales3@tradingsolutions.com",
-        "sales4@tradingsolutions.com",
-        "sales5@tradingsolutions.com",
-    ]
-    for email in expected_emails:
-        assert email in sql, f"missing {email} in 008"
+    def test_file_exists(self):
+        path = MIGRATIONS_DIR / "008_email_threads.sql"
+        assert path.exists()
 
+    def test_creates_email_threads_table(self, migration_sql):
+        assert "CREATE TABLE IF NOT EXISTS email_threads" in migration_sql
 
-def test_migration_008_rol_is_comercial():
-    sql = MIGRATION_PATH.read_text(encoding="utf-8")
-    assert "'comercial'" in sql
-    # And does not seed anyone with a different rol.
-    assert "'compliance'" not in sql
-    assert "'inside_sales'" not in sql
+    def test_has_foreign_key_to_requests(self, migration_sql):
+        # Must reference the requests table via FK (supports cascade delete).
+        assert "REFERENCES requests" in migration_sql
 
+    def test_has_at_least_one_index(self, migration_sql):
+        assert "CREATE INDEX" in migration_sql
 
-def test_migration_008_is_idempotent():
-    sql = MIGRATION_PATH.read_text(encoding="utf-8")
-    assert "ON CONFLICT" in sql
-    assert "DO UPDATE" in sql
+    def test_includes_gmail_thread_id_column(self, migration_sql):
+        assert "gmail_thread_id" in migration_sql
+
+    def test_includes_references_chain_column(self, migration_sql):
+        assert "references_chain" in migration_sql

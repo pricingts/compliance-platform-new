@@ -277,18 +277,18 @@ No new account is created. No additional Workspace license is consumed.
 The service account gains delegated `gmail.send` permission only for users
 in the `tradingsolutions.com` domain.
 
-### Apply migration 007 to Postgres dev + production
+### Apply migration 008 to Postgres dev + production
 
 ```bash
 # dev
 railway environment dev
 railway service Postgres-VuzG
-railway run --no-local python3 migrations/run_migration.py migrations/007_email_threads.sql
+railway run --no-local python3 migrations/run_migration.py migrations/008_email_threads.sql
 
 # production (aditive, safe)
 railway environment production
 railway service Postgres
-railway run --no-local python3 migrations/run_migration.py migrations/007_email_threads.sql
+railway run --no-local python3 migrations/run_migration.py migrations/008_email_threads.sql
 ```
 
 Already applied in both environments during Phase 8 rollout.
