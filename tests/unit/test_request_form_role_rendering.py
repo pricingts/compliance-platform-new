@@ -22,6 +22,44 @@ def _user(email="u@tradingsolutions.com", nombre="User", rol="otro", activo=True
     return {"email": email, "nombre_display": nombre, "rol": rol, "activo": activo}
 
 
+class TestComercialOptions:
+    """The IS comercial picker must disambiguate comerciales who share a display
+    name by putting the email in the label, while still mapping back to the name."""
+
+    def test_disambiguates_duplicate_display_names(self):
+        from forms.request_form import _comercial_options
+        comerciales = [
+            {"nombre_display": "Juan Perez", "email": "juan@x.com"},
+            {"nombre_display": "Juan Perez", "email": "jp2@x.com"},
+        ]
+        opts = _comercial_options(comerciales)
+        assert len(opts) == 2  # two distinct labels despite the same name
+        assert opts["Juan Perez (juan@x.com)"] == "Juan Perez"
+        assert opts["Juan Perez (jp2@x.com)"] == "Juan Perez"
+
+    def test_empty_list(self):
+        from forms.request_form import _comercial_options
+        assert _comercial_options([]) == {}
+
+
+class TestRequestDedupKey:
+    """Content-based key to ignore an accidental identical re-submit (double
+    click) without ever blocking a genuinely different request."""
+
+    def test_identical_inputs_same_key(self):
+        from forms.request_form import _request_dedup_key
+        k1 = _request_dedup_key("Acme", "a@x.com", "cliente", "Pedro")
+        k2 = _request_dedup_key("Acme", "a@x.com", "cliente", "Pedro")
+        assert k1 == k2
+
+    def test_different_inputs_distinct_keys(self):
+        from forms.request_form import _request_dedup_key
+        base = _request_dedup_key("Acme", "a@x.com", "cliente", "Pedro")
+        assert _request_dedup_key("Acme", "b@x.com", "cliente", "Pedro") != base
+        assert _request_dedup_key("Other", "a@x.com", "cliente", "Pedro") != base
+        assert _request_dedup_key("Acme", "a@x.com", "proveedor", "Pedro") != base
+
+
 class TestBuildRequesterDataComercial:
     def test_comercial_gets_own_name(self):
         from forms.request_form import _build_requester_data

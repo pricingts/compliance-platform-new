@@ -177,6 +177,34 @@ def _build_requester_data(
     }
 
 
+def _comercial_options(assigned_comerciales) -> dict:
+    """Map a unique '{nombre} ({email})' label to each comercial's nombre_display.
+
+    Putting the email in the label disambiguates comerciales who share a display
+    name; the value stays the nombre_display so storage and downstream display
+    are unchanged.
+    """
+    return {
+        f"{c['nombre_display']} ({c['email']})": c["nombre_display"]
+        for c in (assigned_comerciales or [])
+    }
+
+
+def _request_dedup_key(company_name, email, tipo_solicitud, requested_by) -> str:
+    """Stable key over a request's salient inputs, used to ignore an accidental
+    identical re-submit (double click). Deterministic (no randomness): two
+    identical submits collide while any changed field yields a new key, so a
+    genuinely different request is never blocked.
+    """
+    parts = [
+        (company_name or "").strip().lower(),
+        (email or "").strip().lower(),
+        (tipo_solicitud or "").strip().lower(),
+        (requested_by or "").strip().lower(),
+    ]
+    return "|".join(parts)
+
+
 def _render_requester_section(session, tipo_solicitud, current_user):
     """Render the requester input depending on request type AND role.
 
@@ -209,12 +237,13 @@ def _render_requester_section(session, tipo_solicitud, current_user):
                     "No tienes comerciales asignados. Contacta al administrador."
                 )
             else:
-                options = [c["nombre_display"] for c in assigned_comerciales]
-                dropdown_value = st.selectbox(
+                options_map = _comercial_options(assigned_comerciales)
+                selected_label = st.selectbox(
                     "Comercial al que apoya esta solicitud",
-                    options,
+                    list(options_map.keys()),
                     key="comercial_for_is",
                 )
+                dropdown_value = options_map.get(selected_label)
         else:
             # compliance / otro: no commercial field
             st.info(f"Solicitud creada por: {nombre} (rol: {rol})")
@@ -920,6 +949,21 @@ def forms():
             # Sheets and the compliance email all store the same trimmed value.
             company_info["email"] = normalize_emails(company_info["email"])
 
+            # Guard against an accidental identical re-submit (double click): if
+            # the exact same request was just saved in this session, skip it.
+            # Streamlit serializes reruns, so the second click sees the key set
+            # by the first. Any changed field produces a new key, so this never
+            # blocks a genuinely different request.
+            _dedup_key = _request_dedup_key(
+                company_name, company_info["email"], tipo_solicitud, requested_by
+            )
+            if st.session_state.get("_last_saved_request_key") == _dedup_key:
+                st.warning(
+                    "Esta solicitud ya fue guardada. Si necesitas crear otra, "
+                    "modifica algún dato."
+                )
+                return
+
             request_id = _save_request_to_db(
                 session=session,
                 profile_id=profile_id,
@@ -951,6 +995,9 @@ def forms():
             )
             if request_id is None:
                 return
+
+            # Remember this request so an accidental double-submit is ignored.
+            st.session_state["_last_saved_request_key"] = _dedup_key
 
             # Reminder schedule is now created inside _save_request_to_db, in the
             # same atomic transaction as the request itself.
