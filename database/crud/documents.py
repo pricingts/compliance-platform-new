@@ -406,6 +406,11 @@ def upsert_request_info(
     }
 
     if existing_row:
+        # Intentionally updates ALL registration rows for the request: these are
+        # request/company-level attributes (same legal name + creation date for
+        # every document of the request), and the reader below uses an unordered
+        # ``LIMIT 1`` — scoping the UPDATE to a single row could leave the row the
+        # reader happens to pick stale. Do not "optimize" this to one row.
         session.execute(
             text("""
                 UPDATE registration

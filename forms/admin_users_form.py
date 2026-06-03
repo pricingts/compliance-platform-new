@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Iterable
 
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
 
 from config.constants import ALLOWED_EMAIL_DOMAINS
 from database.crud.inside_sales_assignments import (
@@ -27,8 +28,11 @@ from database.crud.users import (
     update_user,
 )
 from services.audit import log_action
+from services.logging_config import get_logger
 from services.users import VALID_ROLES
 from utils.validators import sanitize_text
+
+logger = get_logger(__name__)
 
 # Must stay in sync with migrations/seed_super_admin.sql
 SUPER_ADMIN_EMAIL = "jsanchez@tradingsolutions.com"
@@ -90,6 +94,21 @@ def _current_admin_email() -> str:
     return st.session_state.get("_user_email") or "unknown"
 
 
+def _safe_log(session, **kwargs) -> None:
+    """Best-effort audit log for the admin panel.
+
+    The user/assignment CRUD has already self-committed by the time we log, so a
+    failing audit insert must NOT surface as an unhandled error in the UI. On
+    failure we warn and roll back the (audit-only) transaction; the subsequent
+    ``session.commit()`` in the caller then commits nothing.
+    """
+    try:
+        log_action(session, **kwargs)
+    except SQLAlchemyError:
+        logger.warning("Audit log failed in admin users panel", exc_info=True)
+        session.rollback()
+
+
 def _render_lista_tab(session) -> None:
     st.subheader("Usuarios existentes")
     show_inactive = st.checkbox("Mostrar inactivos", value=False, key="admin_users_show_inactive")
@@ -116,7 +135,7 @@ def _render_lista_tab(session) -> None:
             if st.button("Guardar cambios", key=f"save_{email}"):
                 old_snapshot = {"nombre_display": user["nombre_display"], "rol": user["rol"]}
                 update_user(session, email, nombre_display=new_nombre, rol=new_rol)
-                log_action(
+                _safe_log(
                     session,
                     user_email=_current_admin_email(),
                     action="UPDATE",
@@ -140,7 +159,7 @@ def _render_lista_tab(session) -> None:
                     disabled=not can_deactivate,
                 ):
                     set_user_inactive(session, email)
-                    log_action(
+                    _safe_log(
                         session,
                         user_email=_current_admin_email(),
                         action="UPDATE",
@@ -156,7 +175,7 @@ def _render_lista_tab(session) -> None:
             else:
                 if st.button("Reactivar", key=f"reactivate_{email}"):
                     update_user(session, email, activo=True)
-                    log_action(
+                    _safe_log(
                         session,
                         user_email=_current_admin_email(),
                         action="UPDATE",
@@ -204,7 +223,7 @@ def _render_nuevo_usuario_tab(session) -> None:
         st.error("Ya existe un usuario con ese email.")
         return
 
-    log_action(
+    _safe_log(
         session,
         user_email=admin_email,
         action="CREATE",
@@ -250,7 +269,7 @@ def _render_asignaciones_tab(session) -> None:
         col1.write(a["comercial_email"])
         if col2.button("Quitar", key=f"rm_{selected_is_email}_{a['comercial_email']}"):
             remove_assignment(session, selected_is_email, a["comercial_email"])
-            log_action(
+            _safe_log(
                 session,
                 user_email=_current_admin_email(),
                 action="DELETE",
@@ -279,7 +298,7 @@ def _render_asignaciones_tab(session) -> None:
         new_c_email = available[new_c_label]
         admin_email = _current_admin_email()
         assign_comercial(session, selected_is_email, new_c_email, assigned_by=admin_email)
-        log_action(
+        _safe_log(
             session,
             user_email=admin_email,
             action="CREATE",

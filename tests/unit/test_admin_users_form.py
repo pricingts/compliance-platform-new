@@ -12,6 +12,47 @@ from __future__ import annotations
 from config.constants import ALLOWED_EMAIL_DOMAINS
 
 
+class TestSafeLog:
+    """_safe_log wraps audit logging so a failed log_action never throws after
+    the user/assignment operation it audits already succeeded (and committed)."""
+
+    def test_swallows_sqlalchemy_error(self, db_session, monkeypatch):
+        import forms.admin_users_form as af
+        from sqlalchemy.exc import SQLAlchemyError
+
+        def _boom(*args, **kwargs):
+            raise SQLAlchemyError("audit table down")
+
+        monkeypatch.setattr(af, "log_action", _boom)
+        # Must NOT raise — the audited operation already happened.
+        af._safe_log(
+            db_session,
+            user_email="admin@tradingsolutions.com",
+            action="CREATE",
+            entity_type="user",
+            entity_id=None,
+            details="x",
+        )
+
+    def test_forwards_to_log_action_on_success(self, db_session, monkeypatch):
+        import forms.admin_users_form as af
+        captured = {}
+
+        def _ok(session, **kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(af, "log_action", _ok)
+        af._safe_log(
+            db_session,
+            user_email="admin@tradingsolutions.com",
+            action="UPDATE",
+            entity_type="user",
+            entity_id=None,
+            details="y",
+        )
+        assert captured["action"] == "UPDATE"
+
+
 class TestValidateNewUserData:
     """Tests for _validate_new_user_data."""
 
