@@ -49,6 +49,38 @@ def insert_user(
     session.commit()
 
 
+def create_user_if_absent(
+    session: Session,
+    email: str,
+    nombre_display: str,
+    rol: str,
+    created_by: Optional[str] = None,
+) -> bool:
+    """Insert a user, returning True if created or False if it already existed.
+
+    Race-safe via ``INSERT ... ON CONFLICT DO NOTHING`` (same pattern as the
+    assignment CRUD). This closes the TOCTOU gap in the admin panel between a
+    ``get_user_by_email`` pre-check and the insert: two admins creating the same
+    email no longer surface a raw IntegrityError. Existing rows are left
+    untouched (DO NOTHING, not DO UPDATE).
+    """
+    result = session.execute(
+        text("""
+            INSERT INTO users (email, nombre_display, rol, activo, created_by)
+            VALUES (:email, :nombre_display, :rol, TRUE, :created_by)
+            ON CONFLICT (email) DO NOTHING
+        """),
+        {
+            "email": email.lower().strip(),
+            "nombre_display": nombre_display,
+            "rol": rol,
+            "created_by": created_by,
+        },
+    )
+    session.commit()
+    return result.rowcount > 0
+
+
 def update_user(
     session: Session,
     email: str,

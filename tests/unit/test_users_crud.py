@@ -30,6 +30,36 @@ class TestInsertUser:
         with pytest.raises(Exception):
             insert_user(db_session, email="x@tradingsolutions.com", nombre_display="Y", rol="inside_sales")
 
+    def test_create_user_if_absent_inserts_then_reports_existing(self, db_session):
+        """Race-safe creation for the admin panel: returns True when it creates
+        the user and False (no exception) when the email already exists —
+        closing the TOCTOU gap between the pre-check and the insert."""
+        from database.crud.users import create_user_if_absent, get_user_by_email
+
+        created = create_user_if_absent(
+            db_session,
+            email="new@tradingsolutions.com",
+            nombre_display="New",
+            rol="comercial",
+            created_by="admin@tradingsolutions.com",
+        )
+        assert created is True
+        assert get_user_by_email(db_session, "new@tradingsolutions.com") is not None
+
+        # Second attempt (different case) must NOT raise and must report no insert.
+        again = create_user_if_absent(
+            db_session,
+            email="NEW@tradingsolutions.com",
+            nombre_display="Dup",
+            rol="inside_sales",
+            created_by="admin@tradingsolutions.com",
+        )
+        assert again is False
+        # DO NOTHING (not DO UPDATE): the original row is untouched.
+        u = get_user_by_email(db_session, "new@tradingsolutions.com")
+        assert u["nombre_display"] == "New"
+        assert u["rol"] == "comercial"
+
     def test_insert_user_defaults_activo_true(self, db_session):
         from database.crud.users import insert_user, get_user_by_email
         insert_user(db_session, email="a@tradingsolutions.com", nombre_display="A", rol="otro")

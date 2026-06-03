@@ -21,8 +21,7 @@ from database.crud.inside_sales_assignments import (
     remove_assignment,
 )
 from database.crud.users import (
-    get_user_by_email,
-    insert_user,
+    create_user_if_absent,
     list_users,
     set_user_inactive,
     update_user,
@@ -192,18 +191,19 @@ def _render_nuevo_usuario_tab(session) -> None:
         st.error(err)
         return
 
-    if get_user_by_email(session, email_clean):
-        st.error("Ya existe un usuario con ese email.")
-        return
-
     admin_email = _current_admin_email()
-    insert_user(
+    # Race-safe create: returns False (instead of raising IntegrityError) if the
+    # email already exists, even under a concurrent create by another admin.
+    if not create_user_if_absent(
         session,
         email=email_clean,
         nombre_display=nombre_clean,
         rol=rol,
         created_by=admin_email,
-    )
+    ):
+        st.error("Ya existe un usuario con ese email.")
+        return
+
     log_action(
         session,
         user_email=admin_email,
