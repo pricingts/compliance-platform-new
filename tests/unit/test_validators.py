@@ -182,3 +182,100 @@ class TestIsAllowedEmailDomain:
 
     def test_empty_domain_returns_false(self):
         assert is_allowed_email_domain("user@") is False
+
+
+class TestValidateEmails:
+    """Tests for validate_emails — accepts one OR many emails separated by
+    comma / semicolon. Used so a comercial can register several client contact
+    addresses in a single field."""
+
+    def test_single_valid_email(self):
+        from utils.validators import validate_emails
+        assert validate_emails("user@example.com") is True
+
+    def test_multiple_comma_separated(self):
+        from utils.validators import validate_emails
+        assert validate_emails("a@x.com, b@y.com") is True
+
+    def test_multiple_semicolon_separated(self):
+        from utils.validators import validate_emails
+        assert validate_emails("a@x.com; b@y.com") is True
+
+    def test_mixed_separators_and_whitespace(self):
+        from utils.validators import validate_emails
+        assert validate_emails("  a@x.com ; b@y.com ,c@z.com  ") is True
+
+    def test_one_invalid_among_valid_is_false(self):
+        from utils.validators import validate_emails
+        assert validate_emails("a@x.com, not-an-email") is False
+
+    def test_trailing_empty_entries_ignored(self):
+        from utils.validators import validate_emails
+        assert validate_emails("a@x.com,,") is True
+
+    def test_empty_is_false(self):
+        from utils.validators import validate_emails
+        assert validate_emails("") is False
+
+    def test_none_is_false(self):
+        from utils.validators import validate_emails
+        assert validate_emails(None) is False
+
+    def test_non_string_is_false(self):
+        from utils.validators import validate_emails
+        assert validate_emails(123) is False
+
+    def test_newline_injection_is_rejected(self):
+        """An address carrying a CR/LF (header-injection vector) must fail."""
+        from utils.validators import validate_emails
+        assert validate_emails("a@x.com\nBcc: evil@x.com") is False
+
+
+class TestNormalizeEmails:
+    """Tests for normalize_emails — canonical storage form: trimmed, deduped,
+    comma+space joined, no embedded newlines."""
+
+    def test_single_unchanged(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails("user@example.com") == "user@example.com"
+
+    def test_trims_and_joins_with_comma_space(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails("  a@x.com ,  b@y.com ") == "a@x.com, b@y.com"
+
+    def test_semicolons_normalized_to_comma_space(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails("a@x.com; b@y.com") == "a@x.com, b@y.com"
+
+    def test_dedupes_case_insensitively_keeping_order(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails("a@x.com, A@X.com, b@y.com") == "a@x.com, b@y.com"
+
+    def test_strips_embedded_newlines(self):
+        from utils.validators import normalize_emails
+        assert "\n" not in normalize_emails("a@x.com\n, b@y.com")
+
+    def test_empty_returns_empty_string(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails("") == ""
+
+    def test_none_returns_empty_string(self):
+        from utils.validators import normalize_emails
+        assert normalize_emails(None) == ""
+
+
+class TestSanitizeTextCRLF:
+    """sanitize_text / sanitize_company_name must neutralize CR/LF so values
+    that flow into email headers (e.g. the subject's company_name) cannot inject
+    headers."""
+
+    def test_sanitize_text_collapses_crlf(self):
+        assert "\n" not in sanitize_text("Acme\r\nBcc: evil@x.com")
+        assert "\r" not in sanitize_text("Acme\r\nBcc: evil@x.com")
+
+    def test_sanitize_company_name_collapses_crlf(self):
+        result = sanitize_company_name("Acme\r\nBcc: evil@x.com")
+        assert "\n" not in result and "\r" not in result
+
+    def test_sanitize_text_plain_unchanged(self):
+        assert sanitize_text("hello world") == "hello world"

@@ -146,6 +146,64 @@ def test_build_email_payload_boolean_fallback_when_list_empty(mock_streamlit):
     assert payload["linea_naviera"] == "Sí"
 
 
+def test_build_email_payload_includes_msc_details_and_notes(mock_streamlit):
+    """The comercial's free-text notes and the MSC shipping details must reach
+    the mailer payload — they were being dropped before, so compliance never
+    saw POL/POD/Producto/Contenedor/Shipper BL or the notes."""
+    from forms.request_form import _build_email_payload
+
+    client_data = {
+        "linea_naviera": True,
+        "tipo_linea": ["MSC"],
+        "datos_msc": {
+            "POL": "Cartagena",
+            "POD": "Shanghai",
+            "Producto": "Coffee",
+            "Tipo de Contenedor": "40HC",
+            "Shipper en BL": "ACME S.A.",
+        },
+    }
+    payload = _build_email_payload(
+        case_id="C0042",
+        tipo_solicitud="cliente",
+        company_name="Acme Corp",
+        company_info={"email": "c@acme.com"},
+        requested_by="Pedro",
+        client_data=client_data,
+        notes="Cliente prioritario, revisar urgente.",
+    )
+
+    assert payload["pol"] == "Cartagena"
+    assert payload["pod"] == "Shanghai"
+    assert payload["producto"] == "Coffee"
+    assert payload["tipo_contenedor"] == "40HC"
+    assert payload["shipper_bl"] == "ACME S.A."
+    assert payload["notes"] == "Cliente prioritario, revisar urgente."
+    # linea_naviera unchanged: still the joined line names, not the details.
+    assert payload["linea_naviera"] == "MSC"
+
+
+def test_build_email_payload_msc_and_notes_absent_collapse_to_empty(mock_streamlit):
+    """No MSC line and no notes -> the new keys are present but empty strings
+    (so the template omits them)."""
+    from forms.request_form import _build_email_payload
+
+    payload = _build_email_payload(
+        case_id="C0001",
+        tipo_solicitud="proveedor",
+        company_name="Foo",
+        company_info={"email": "v@foo.com"},
+        requested_by="Juan",
+        client_data={},
+    )
+    assert payload["pol"] == ""
+    assert payload["pod"] == ""
+    assert payload["producto"] == ""
+    assert payload["tipo_contenedor"] == ""
+    assert payload["shipper_bl"] == ""
+    assert payload["notes"] == ""
+
+
 def test_build_email_payload_keys_align_with_template_field_map(mock_streamlit):
     """Every snake_case key rendered by the mailer template must be produced
     by this helper — otherwise the email will miss fields silently."""

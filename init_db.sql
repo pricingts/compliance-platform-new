@@ -39,7 +39,8 @@ CREATE TABLE requests (
     trading VARCHAR(100),
     country VARCHAR(100),
     language VARCHAR(50),
-    email VARCHAR(255),
+    -- TEXT so the client contact field can hold several emails (see migration 010).
+    email TEXT,
     reminder_frequency VARCHAR(100),
     operation_type VARCHAR(50),
     commodity VARCHAR(255),
@@ -48,7 +49,14 @@ CREATE TABLE requests (
     has_port BOOLEAN DEFAULT FALSE,
     has_shipping_line BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    user_email VARCHAR(255)
+    user_email VARCHAR(255),
+    -- Migration 003 additions
+    submitted_by_email VARCHAR(255),
+    notes TEXT,
+    case_id VARCHAR(10),
+    reminder_max_months INTEGER,
+    -- Migration 005 addition (compliance mailer idempotency guard)
+    email_notified_at TIMESTAMP
 );
 
 -- =====================
@@ -164,6 +172,67 @@ CREATE TABLE audit_log (
 );
 
 -- =====================
+-- 14. Tabla users (migration 003)
+-- =====================
+CREATE TABLE users (
+    email VARCHAR(255) PRIMARY KEY,
+    nombre_display VARCHAR(255) NOT NULL,
+    rol VARCHAR(20) NOT NULL CHECK (rol IN ('comercial','inside_sales','compliance','otro')),
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255)
+);
+
+-- =====================
+-- 15. Tabla inside_sales_comerciales (many-to-many, migration 003)
+-- =====================
+CREATE TABLE inside_sales_comerciales (
+    inside_sales_email VARCHAR(255) NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    comercial_email    VARCHAR(255) NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    assigned_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by        VARCHAR(255),
+    PRIMARY KEY (inside_sales_email, comercial_email)
+);
+
+-- =====================
+-- 16. Tabla request_attachments (migration 003)
+-- =====================
+CREATE TABLE request_attachments (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    file_name VARCHAR(255) NOT NULL,
+    drive_link TEXT NOT NULL,
+    uploaded_by VARCHAR(255) NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================
+-- 17. Tabla reminder_schedule (migration 003)
+-- =====================
+CREATE TABLE reminder_schedule (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    next_reminder_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    frequency_days INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================
+-- 18. Tabla email_threads (migration 008)
+-- =====================
+CREATE TABLE email_threads (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL UNIQUE REFERENCES requests(id) ON DELETE CASCADE,
+    gmail_thread_id VARCHAR(255),
+    last_message_id VARCHAR(512),
+    references_chain TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================
 -- INDEXES
 -- =====================
 CREATE INDEX IF NOT EXISTS idx_requests_user_email ON requests(user_email);
@@ -178,6 +247,22 @@ CREATE INDEX IF NOT EXISTS idx_comment_entries_request_id ON comment_entries(req
 CREATE INDEX IF NOT EXISTS idx_notifications_user_email ON notifications(user_email);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity_id ON audit_log(entity_id);
+-- requests migration-003/005 columns
+CREATE INDEX IF NOT EXISTS idx_requests_submitted_by_email ON requests(submitted_by_email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_case_id_unique
+    ON requests(case_id) WHERE case_id IS NOT NULL;
+-- users + assignments
+CREATE INDEX IF NOT EXISTS idx_users_rol ON users(rol);
+CREATE INDEX IF NOT EXISTS idx_users_activo ON users(activo);
+CREATE INDEX IF NOT EXISTS idx_isc_inside_sales ON inside_sales_comerciales(inside_sales_email);
+CREATE INDEX IF NOT EXISTS idx_isc_comercial ON inside_sales_comerciales(comercial_email);
+-- attachments + reminders + email threads
+CREATE INDEX IF NOT EXISTS idx_request_attachments_request_id ON request_attachments(request_id);
+CREATE INDEX IF NOT EXISTS idx_reminder_schedule_next
+    ON reminder_schedule(next_reminder_at) WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_reminder_schedule_request_id ON reminder_schedule(request_id);
+CREATE INDEX IF NOT EXISTS idx_email_threads_request_id ON email_threads(request_id);
+CREATE INDEX IF NOT EXISTS idx_email_threads_gmail_thread_id ON email_threads(gmail_thread_id);
 
 -- =========================================================
 -- 🔗 Relaciones y Consideraciones

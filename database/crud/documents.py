@@ -176,7 +176,8 @@ def get_all_statuses(session: Session) -> dict[str, int]:
 
 def get_shipping_lines_status(session: Session, request_id: int) -> list:
     return session.execute(text("""
-        SELECT id, line_name, status_id
+        SELECT id, line_name, status_id,
+               pol, pod, product, container_type, shipper_bl
         FROM shipping_line_registration
         WHERE request_id = :req
     """), {"req": request_id}).fetchall()
@@ -481,7 +482,7 @@ def get_requests_for_progress(
     total = session.execute(count_sql, params).scalar()
 
     sql = text(f"""
-        SELECT id, company_name, profile_id, created_at, user_email
+        SELECT id, company_name, profile_id, created_at, user_email, notes
         FROM requests
         WHERE (:email IS NULL OR LOWER(user_email) = LOWER(:email))
         {search_filter}
@@ -497,6 +498,7 @@ def get_requests_for_progress(
             "profile_id": r.profile_id,
             "created_at": r.created_at,
             "user_email": r.user_email,
+            "notes": r.notes,
         }
         for r in rows
     ]

@@ -16,7 +16,7 @@ from services.logging_config import get_logger
 from utils.error_handlers import handle_error, sanitize_for_user
 from utils.exceptions import DriveUploadError, MailerError, SheetsError
 from utils.ui_helpers import render_section_header
-from utils.validators import validate_email, sanitize_company_name
+from utils.validators import validate_emails, normalize_emails, sanitize_company_name
 from config.constants import (
     TERMINALES,
     TRADING_COUNTRIES,
@@ -249,7 +249,11 @@ def _render_company_info():
             TRADING_COUNTRIES,
             key="trading_creacion",
         )
-        email = st.text_input("Correo electrónico", key="correo_compania")
+        email = st.text_input(
+            "Correo(s) electrónico(s)",
+            help="Puede ingresar varios separados por coma o punto y coma.",
+            key="correo_compania",
+        )
     with col3:
         location = st.text_input(
             "Pais de la Compañía a Registrar", key="ubicacion_compania"
@@ -491,8 +495,10 @@ def _validate_form(company_name, email, tipo_solicitud, requested_by):
     if not company_name:
         st.error("Debes ingresar el nombre de la compañía.")
         return False
-    if email and not validate_email(email):
-        st.error("El correo electrónico no parece válido.")
+    if email and not validate_emails(email):
+        st.error(
+            "Ingresa uno o varios correos válidos separados por coma o punto y coma."
+        )
         return False
     if tipo_solicitud.lower() == "proveedor" and not requested_by:
         st.error("Debes ingresar el nombre de quien solicita (proveedor).")
@@ -525,8 +531,15 @@ def _save_request_to_db(
     submitted_by_email=None,
     notes=None,
     reminder_max_months=None,
+    reminder_frequency_days=None,
 ):
     """Persist the request and associated registrations to the database.
+
+    The parent request, its child registrations (customs/port/shipping line)
+    and the reminder schedule are written in a SINGLE transaction so a failure
+    in any child rolls the whole thing back — no orphaned request flagged
+    has_customs/has_port with no detail rows. The audit log is best-effort and
+    committed separately so its failure never discards a saved request.
 
     Returns:
         request_id on success, None on failure.
@@ -565,14 +578,17 @@ def _save_request_to_db(
                 submitted_by_email=submitted_by_email,
                 notes=notes,
                 reminder_max_months=reminder_max_months,
+                commit=False,
             )
 
             if aduana and tipo_aduana:
-                insert_customs_registration(session, request_id, tipo_aduana)
+                insert_customs_registration(
+                    session, request_id, tipo_aduana, commit=False
+                )
 
             if puerto and terminales_seleccionados:
                 insert_port_registration(
-                    session, request_id, terminales_seleccionados
+                    session, request_id, terminales_seleccionados, commit=False
                 )
 
             if linea_naviera and tipo_linea:
@@ -583,33 +599,24 @@ def _save_request_to_db(
                     else:
                         line_data[line] = {}
                 insert_shipping_line_registration(
-                    session, request_id, line_data
+                    session, request_id, line_data, commit=False
                 )
 
-            # Audit: log request creation
-            _audit_email = getattr(st.user, "email", "unknown") if hasattr(st, "user") else "unknown"
-            try:
-                log_action(
-                    session=session,
-                    user_email=_audit_email,
-                    action="CREATE",
-                    entity_type="request",
-                    entity_id=request_id,
-                    new_value={
-                        "company_name": company_name,
-                        "tipo_solicitud": tipo_solicitud,
-                        "trading": trading,
-                        "has_customs": aduana,
-                        "has_port": puerto,
-                        "has_shipping_line": linea_naviera,
-                    },
-                    details=f"Request #{request_id}: {company_name}",
+            # Reminder schedule belongs to the same atomic unit: a request must
+            # never be persisted without it (otherwise reminders silently never
+            # fire for that client).
+            if reminder_frequency_days:
+                from database.crud.reminders import insert_reminder_schedule
+                insert_reminder_schedule(
+                    session,
+                    request_id=request_id,
+                    frequency_days=reminder_frequency_days,
+                    max_months=reminder_max_months,
+                    commit=False,
                 )
-                session.commit()
-            except SQLAlchemyError:
-                logger.warning("Audit log failed for request creation", exc_info=True)
 
-            return request_id
+            # Single atomic commit: parent + children + reminder together.
+            session.commit()
         except SQLAlchemyError as e:
             session.rollback()
             session.close()
@@ -622,6 +629,33 @@ def _save_request_to_db(
                 sanitize_for_user(e, default="Error al guardar la solicitud."),
             )
             return None
+
+        # Audit is best-effort and committed in its OWN transaction so its
+        # failure can never roll back the request we just saved.
+        _audit_email = getattr(st.user, "email", "unknown") if hasattr(st, "user") else "unknown"
+        try:
+            log_action(
+                session=session,
+                user_email=_audit_email,
+                action="CREATE",
+                entity_type="request",
+                entity_id=request_id,
+                new_value={
+                    "company_name": company_name,
+                    "tipo_solicitud": tipo_solicitud,
+                    "trading": trading,
+                    "has_customs": aduana,
+                    "has_port": puerto,
+                    "has_shipping_line": linea_naviera,
+                },
+                details=f"Request #{request_id}: {company_name}",
+            )
+            session.commit()
+        except SQLAlchemyError:
+            logger.warning("Audit log failed for request creation", exc_info=True)
+            session.rollback()
+
+        return request_id
 
 
 def _save_to_sheets(
@@ -734,6 +768,7 @@ def _build_email_payload(
     company_info,
     requested_by,
     client_data,
+    notes=None,
 ):
     """Assemble the dict consumed by the mailer template.
 
@@ -782,6 +817,11 @@ def _build_email_payload(
     else:
         linea_value = ""
 
+    # MSC shipping detail: the comercial fills POL/POD/etc. and they were being
+    # dropped from the email. Surface each as its own payload key so the mailer
+    # template renders a labelled row (empty values collapse and are omitted).
+    datos_msc = client_data.get("datos_msc") or {}
+
     return {
         "case_id": case_id or "",
         "fecha": datetime.now(co_tz).strftime("%Y-%m-%d %H:%M:%S"),
@@ -798,6 +838,12 @@ def _build_email_payload(
         "aduana": aduana_value,
         "puerto": puerto_value,
         "linea_naviera": linea_value,
+        "pol": datos_msc.get("POL") or "",
+        "pod": datos_msc.get("POD") or "",
+        "producto": datos_msc.get("Producto") or "",
+        "tipo_contenedor": datos_msc.get("Tipo de Contenedor") or "",
+        "shipper_bl": datos_msc.get("Shipper en BL") or "",
+        "notes": notes or "",
     }
 
 
@@ -870,6 +916,10 @@ def forms():
             ):
                 return
 
+            # Canonicalize one-or-many client emails once, so the DB, Google
+            # Sheets and the compliance email all store the same trimmed value.
+            company_info["email"] = normalize_emails(company_info["email"])
+
             request_id = _save_request_to_db(
                 session=session,
                 profile_id=profile_id,
@@ -897,21 +947,13 @@ def forms():
                 submitted_by_email=submitted_by_email,
                 notes=notes or None,
                 reminder_max_months=company_info.get("reminder_max_months"),
+                reminder_frequency_days=company_info.get("reminder_frequency_days"),
             )
             if request_id is None:
                 return
 
-            # Phase 7: create reminder schedule
-            try:
-                from database.crud.reminders import insert_reminder_schedule
-                insert_reminder_schedule(
-                    session,
-                    request_id=request_id,
-                    frequency_days=company_info["reminder_frequency_days"],
-                    max_months=company_info["reminder_max_months"],
-                )
-            except SQLAlchemyError:
-                logger.warning("Failed to create reminder schedule", exc_info=True)
+            # Reminder schedule is now created inside _save_request_to_db, in the
+            # same atomic transaction as the request itself.
 
             # Show case_id as proof of submission
             from database.crud.clientes import get_case_id
@@ -1013,6 +1055,7 @@ def forms():
                     company_info=company_info,
                     requested_by=requested_by,
                     client_data=client_data,
+                    notes=notes,
                 )
                 _creator_email = st.session_state.get("_user_email") or submitted_by_email
                 send_request_notification(

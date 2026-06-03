@@ -113,3 +113,65 @@ class TestProgressPagination:
         results, total = get_requests_for_progress(db_session, page=2, page_size=2)
         assert total == 5
         assert len(results) == 1
+
+
+class TestProgressNotesAndMscDetails:
+    """The comercial's notes and MSC shipping detail must be retrievable so the
+    compliance review screen (view_progress) can display them."""
+
+    def test_get_requests_for_progress_includes_notes(self, db_session, seed_profiles):
+        from database.crud.documents import get_requests_for_progress
+
+        db_session.execute(
+            text(
+                "INSERT INTO requests (profile_id, company_name, user_email, notes)"
+                " VALUES (:pid, :name, :email, :notes)"
+            ),
+            {
+                "pid": seed_profiles["cliente"],
+                "name": "Acme",
+                "email": "t@t.com",
+                "notes": "POL: Cartagena / POD: Shanghai",
+            },
+        )
+        db_session.commit()
+
+        results, _ = get_requests_for_progress(db_session)
+        assert results[0]["notes"] == "POL: Cartagena / POD: Shanghai"
+
+    def test_get_shipping_lines_status_includes_msc_details(
+        self, db_session, seed_profiles
+    ):
+        from database.crud.clientes import (
+            insert_client_request,
+            insert_shipping_line_registration,
+        )
+        from database.crud.documents import get_shipping_lines_status
+
+        rid = insert_client_request(
+            db_session,
+            profile_id=seed_profiles["cliente"],
+            company_name="Acme",
+            has_shipping_line=True,
+        )
+        insert_shipping_line_registration(
+            db_session,
+            rid,
+            {
+                "MSC": {
+                    "POL": "Cartagena",
+                    "POD": "Shanghai",
+                    "Producto": "Coffee",
+                    "Tipo de Contenedor": "40HC",
+                    "Shipper en BL": "ACME S.A.",
+                }
+            },
+        )
+
+        rows = get_shipping_lines_status(db_session, rid)
+        assert rows[0].line_name == "MSC"
+        assert rows[0].pol == "Cartagena"
+        assert rows[0].pod == "Shanghai"
+        assert rows[0].product == "Coffee"
+        assert rows[0].container_type == "40HC"
+        assert rows[0].shipper_bl == "ACME S.A."

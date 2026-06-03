@@ -149,6 +149,13 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
                 with colB:
                     st.write("**Fecha de Creación:** —")
 
+            # Free-text notes the comercial left at request creation (POL/POD/etc.
+            # when they were typed here instead of the structured MSC fields).
+            notes = r.get("notes")
+            if notes:
+                st.markdown("**Notas del Comercial:**")
+                st.info(notes)
+
             internal_status_id = get_internal_status(session, request_id)
             internal_status = status_map.get(internal_status_id, "Sin estado")
             st.markdown(f"**Registro Interno:** {status_badge(internal_status)}", unsafe_allow_html=True)
@@ -160,6 +167,17 @@ def show_progress_view(current_user_email: Optional[str] = None, is_admin: bool 
                         sname = status_map.get(line.status_id, "Sin estado")
                         sla = _sla_badge(get_last_status_change_time(session, "shipping_line_registration", line.id))
                         st.markdown(f"- {line.line_name}: {status_badge(sname)}{sla}", unsafe_allow_html=True)
+                        # MSC shipping detail entered by the comercial.
+                        msc_details = [
+                            f"POL: {line.pol}" if line.pol else None,
+                            f"POD: {line.pod}" if line.pod else None,
+                            f"Producto: {line.product}" if line.product else None,
+                            f"Tipo de Contenedor: {line.container_type}" if line.container_type else None,
+                            f"Shipper en BL: {line.shipper_bl}" if line.shipper_bl else None,
+                        ]
+                        msc_details = [d for d in msc_details if d]
+                        if msc_details:
+                            st.caption(" · ".join(msc_details))
 
             ports = get_ports_status(session, request_id)
             if ports:

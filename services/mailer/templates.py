@@ -30,6 +30,14 @@ _FIELD_MAP: tuple[tuple[str, str], ...] = (
     ("aduana", "Aduana"),
     ("puerto", "Puerto"),
     ("linea_naviera", "Línea Naviera"),
+    # MSC shipping detail + free-text notes from the comercial. Empty values are
+    # skipped by the renderer, so these rows only appear when actually filled.
+    ("pol", "POL (Puerto de Origen)"),
+    ("pod", "POD (Puerto de Destino)"),
+    ("producto", "Producto"),
+    ("tipo_contenedor", "Tipo de Contenedor"),
+    ("shipper_bl", "¿Cómo saldrá el Shipper en BL?"),
+    ("notes", "Notas para Compliance"),
 )
 
 

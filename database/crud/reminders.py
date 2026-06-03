@@ -23,11 +23,14 @@ def insert_reminder_schedule(
     frequency_days: int,
     max_months: int,
     created_at: Optional[datetime] = None,
+    commit: bool = True,
 ) -> Optional[int]:
     """Create the schedule row for a brand-new request.
 
     next_reminder_at = created + frequency_days
     expires_at       = created + max_months * 30 days
+
+    ``commit=False`` lets the caller fold this into the request-save transaction.
     """
     created = created_at or utc_now()
     next_at = created + timedelta(days=frequency_days)
@@ -66,7 +69,8 @@ def insert_reminder_schedule(
         sched_id = session.execute(
             text("SELECT id FROM reminder_schedule WHERE rowid = last_insert_rowid()")
         ).scalar()
-    session.commit()
+    if commit:
+        session.commit()
     return sched_id
 
 

@@ -112,13 +112,30 @@ alembic downgrade -1
 
 ### Initial Schema
 
-For fresh deployments, the database schema can be initialized directly with `init_db.sql`:
+For fresh deployments, initialize the full schema with `init_db.sql`, then apply
+the seed migrations so there is at least one admin user to log in with:
 
 ```bash
+# 1. Full schema (all tables, columns and indexes — kept in sync with migrations)
 psql $DATABASE_URL < init_db.sql
+
+# 2. Seeds (admin + comerciales). Idempotent (ON CONFLICT), safe to re-run.
+python migrations/run_migration.py migrations/006_seed_admin_lbandera.sql
+python migrations/run_migration.py migrations/009_seed_comerciales.sql
+psql $DATABASE_URL < migrations/seed_super_admin.sql
 ```
 
-This creates all 10 tables with their relationships and constraints.
+`init_db.sql` is the complete, current schema — it already includes every table
+and column added by migrations 002–010 (`users`, `inside_sales_comerciales`,
+`request_attachments`, `reminder_schedule`, `email_threads`, the `requests`
+columns `case_id`/`notes`/`submitted_by_email`/`reminder_max_months`/
+`email_notified_at`, and `email` as `TEXT`). When you add a new migration, mirror
+its DDL here so fresh deployments stay correct.
+
+> Note: the `.py` migrations (e.g. `003_users_admin_and_enhancements.py`,
+> `003_sqlite_local.py`) are NOT picked up by `run_migration.py`'s `*.sql` glob —
+> run them directly with `python migrations/<file>.py` when applying migrations
+> to an existing database.
 
 ## Health Check
 

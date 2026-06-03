@@ -112,6 +112,42 @@ class TestRenderRequestEmail:
         ):
             assert label in html_body, f"Missing label in html: {label!r}"
 
+    def test_renders_notes_and_msc_details_when_present(self):
+        """Notas + MSC shipping detail (POL/POD/Producto/Contenedor/Shipper BL)
+        must render so compliance actually receives the comercial's comments."""
+        from services.mailer.templates import render_request_email
+
+        payload = {
+            "company_name": "Acme Corp",
+            "pol": "Cartagena",
+            "pod": "Shanghai",
+            "producto": "Coffee",
+            "tipo_contenedor": "40HC",
+            "shipper_bl": "ACME S.A.",
+            "notes": "Cliente prioritario.",
+        }
+        _, html_body = render_request_email("C0042", payload)
+        # Labels present
+        assert "POL (Puerto de Origen)" in html_body
+        assert "POD (Puerto de Destino)" in html_body
+        assert "Producto" in html_body
+        assert "Tipo de Contenedor" in html_body
+        assert "Shipper en BL" in html_body
+        assert "Notas para Compliance" in html_body
+        # Values present
+        assert "Cartagena" in html_body
+        assert "Shanghai" in html_body
+        assert "Cliente prioritario." in html_body
+
+    def test_notes_and_msc_omitted_when_absent(self):
+        """A request with no MSC line and no notes must not render those rows."""
+        from services.mailer.templates import render_request_email
+
+        payload = {"company_name": "Acme Corp", "email": "c@acme.com"}
+        _, html_body = render_request_email("C0042", payload)
+        assert "Notas para Compliance" not in html_body
+        assert "POL (Puerto de Origen)" not in html_body
+
     def test_footer_mentions_compliance_platform(self):
         from services.mailer.templates import render_request_email
 

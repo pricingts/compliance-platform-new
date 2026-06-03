@@ -80,7 +80,8 @@ class Request(Base):
     trading: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     language: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # TEXT (not VARCHAR) so the client contact field can hold several emails.
+    email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reminder_frequency: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True,
     )
@@ -101,6 +102,8 @@ class Request(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     case_id: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, unique=True)
     reminder_max_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Migration 005: idempotency guard for the compliance mailer.
+    email_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     profile: Mapped["Profile"] = relationship(back_populates="requests")

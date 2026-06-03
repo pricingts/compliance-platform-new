@@ -85,6 +85,7 @@ def insert_client_request(
     submitted_by_email: Optional[str] = None,
     notes: Optional[str] = None,
     reminder_max_months: Optional[int] = None,
+    commit: bool = True,
 ) -> int:
     """Insert a new client/provider request and return the new row id.
 
@@ -95,6 +96,9 @@ def insert_client_request(
     - submitted_by_email: set when an Inside Sales creates on behalf of a comercial
     - notes: free-text for compliance
     - reminder_max_months: upper bound (1/2/3) on reminder duration
+
+    Set ``commit=False`` to let the caller own the transaction boundary so the
+    parent row and its child registrations commit (or roll back) atomically.
     """
     params = {
         "profile_id": profile_id,
@@ -174,14 +178,19 @@ def insert_client_request(
         {"cid": case_id, "rid": request_id},
     )
 
-    session.commit()
+    if commit:
+        session.commit()
     return request_id
 
 
 def insert_customs_registration(
-    session: Session, request_id: int, customs_list: list
+    session: Session, request_id: int, customs_list: list, commit: bool = True
 ) -> None:
-    """Insert customs registration rows for a request."""
+    """Insert customs registration rows for a request.
+
+    ``commit=False`` lets the caller keep the parent request and these child
+    rows in one atomic transaction.
+    """
     if not customs_list:
         return
     for customs_name in customs_list:
@@ -192,15 +201,19 @@ def insert_customs_registration(
             ),
             {"request_id": request_id, "customs_name": customs_name},
         )
-    session.commit()
+    if commit:
+        session.commit()
 
 
 def insert_port_registration(
-    session: Session, request_id: int, ports_dict: dict
+    session: Session, request_id: int, ports_dict: dict, commit: bool = True
 ) -> None:
     """Insert port and terminal registration rows for a request.
 
     ports_dict example: {'Cartagena': ['Contecar', 'SPRC'], 'Buenaventura': ['TCBUEN']}
+
+    ``commit=False`` lets the caller keep the parent request and these child
+    rows in one atomic transaction.
     """
     if not ports_dict:
         return
@@ -227,13 +240,18 @@ def insert_port_registration(
                         "terminal_name": terminal,
                     },
                 )
-    session.commit()
+    if commit:
+        session.commit()
 
 
 def insert_shipping_line_registration(
-    session: Session, request_id: int, lines_data: dict
+    session: Session, request_id: int, lines_data: dict, commit: bool = True
 ) -> None:
-    """Insert shipping line registration rows with details for a request."""
+    """Insert shipping line registration rows with details for a request.
+
+    ``commit=False`` lets the caller keep the parent request and these child
+    rows in one atomic transaction.
+    """
     if not lines_data:
         return
     for line_name, line_info in lines_data.items():
@@ -254,5 +272,6 @@ def insert_shipping_line_registration(
                 "shipper_bl": line_info.get("Shipper en BL"),
             },
         )
-    session.commit()
+    if commit:
+        session.commit()
 

@@ -13,11 +13,60 @@ def validate_email(email: str) -> bool:
     return bool(EMAIL_RE.match(email.strip()))
 
 
+def validate_emails(value: str) -> bool:
+    """Validate one OR many emails separated by comma/semicolon.
+
+    Lets a comercial register several client contact addresses in one field.
+    Returns True only when there is at least one address and every address is
+    well-formed. Any CR/LF in the input is rejected outright (header-injection
+    guard) — a single email with a trailing newline would otherwise slip past
+    EMAIL_RE because ``$`` matches before a trailing ``\\n``.
+    """
+    if not value or not isinstance(value, str):
+        return False
+    if "\n" in value or "\r" in value:
+        return False
+    parts = [p.strip() for p in re.split(r"[,;]", value)]
+    parts = [p for p in parts if p]
+    if not parts:
+        return False
+    return all(EMAIL_RE.match(p) for p in parts)
+
+
+def normalize_emails(value: str) -> str:
+    """Canonical storage form for one/many emails.
+
+    Drops CR/LF, splits on comma/semicolon, trims each address, removes
+    case-insensitive duplicates (keeping first occurrence and original casing),
+    and re-joins with ``", "``. Returns ``""`` for empty/None/non-str input.
+    """
+    if not value or not isinstance(value, str):
+        return ""
+    cleaned = value.replace("\r", " ").replace("\n", " ")
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in re.split(r"[,;]", cleaned):
+        addr = part.strip()
+        if not addr:
+            continue
+        key = addr.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(addr)
+    return ", ".join(out)
+
+
 def sanitize_text(text: str, max_length: int = 255) -> str:
-    """Sanitize text input: strip whitespace, limit length."""
+    """Sanitize text input: drop CR/LF, strip whitespace, limit length.
+
+    CR/LF are collapsed to spaces so values that later flow into email headers
+    (e.g. the notification subject's company_name) cannot inject headers.
+    """
     if not text or not isinstance(text, str):
         return ""
-    return text.strip()[:max_length]
+    cleaned = text.replace("\r", " ").replace("\n", " ")
+    return cleaned.strip()[:max_length]
 
 
 def sanitize_company_name(name: str) -> str:
