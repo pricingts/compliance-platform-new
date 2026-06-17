@@ -73,6 +73,27 @@ st.session_state["_user_role"] = role
 st.session_state["_user_display_name"] = user_name
 st.session_state["_is_admin"] = is_admin
 
+# Validate mailer configuration once per session so a misconfiguration (e.g.
+# transport=gmail with no service-account credentials) is visible at app load
+# instead of failing silently only when a request is submitted. Surfaced to
+# admins; never blocks the app.
+if "_mailer_cfg_checked" not in st.session_state:
+    st.session_state["_mailer_cfg_checked"] = True
+    try:
+        from services.mailer import validate_mailer_config
+        _mailer_cfg = validate_mailer_config()
+        if _mailer_cfg["enabled"] and not _mailer_cfg["ok"]:
+            st.session_state["_mailer_cfg_problems"] = _mailer_cfg["problems"]
+    except Exception as _cfg_err:  # never block the app on a config check
+        logger.warning("Mailer config validation failed to run: %s", _cfg_err)
+
+_mailer_problems = st.session_state.get("_mailer_cfg_problems")
+if is_admin and _mailer_problems:
+    st.error(
+        "⚠️ Configuración del mailer con problemas (las notificaciones podrían "
+        "no enviarse): " + "; ".join(_mailer_problems)
+    )
+
 # Phase 7: dispatch due reminders, gated to once every 5 minutes per session
 # to avoid hammering the DB on every Streamlit rerun.
 _last_run_key = "_reminders_last_run"
@@ -91,6 +112,27 @@ if _last_run is None or (_utc_now() - _last_run) > _td(minutes=5):
         # expected under load; an ImportError here would only fire if the
         # reminders module itself is broken — either way, just log.
         logger.exception("Reminder dispatch failed on page load: %s", _rem_err)
+
+# Redeliver any mailer-era request whose creation notification never went out
+# (e.g. a rerun preempted the send on a double-submit, or a transient transport
+# error). Gated to once every 5 minutes per session like reminders.
+# send_request_notification is idempotent (it skips already-notified rows), so
+# this is safe to run repeatedly. A scheduled Railway job is recommended for
+# coverage when no one is logged in (see plan); this page-load sweep guarantees
+# recovery whenever the app is in use.
+_pending_last_run_key = "_pending_notif_last_run"
+_pending_last_run = st.session_state.get(_pending_last_run_key)
+if _pending_last_run is None or (_utc_now() - _pending_last_run) > _td(minutes=5):
+    try:
+        from services.mailer.pending import retry_pending_notifications
+        _pn_session = SessionLocal()
+        try:
+            retry_pending_notifications(_pn_session)
+        finally:
+            _pn_session.close()
+        st.session_state[_pending_last_run_key] = _utc_now()
+    except (SQLAlchemyError, ImportError) as _pn_err:
+        logger.exception("Pending-notification sweep failed on page load: %s", _pn_err)
 
 # --- Navigation (only rendered when authenticated) ---
 pages_compliance = [

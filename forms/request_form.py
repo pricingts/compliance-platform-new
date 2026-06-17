@@ -52,6 +52,22 @@ def _is_sheets_enabled() -> bool:
     return bool(cfg.get("enabled", False))
 
 
+def _is_mailer_enabled() -> bool:
+    """Return True iff ``st.secrets['mailer']['enabled']`` is truthy.
+
+    Used only to decide whether to surface an operator warning when a
+    notification was not delivered: when the mailer is intentionally disabled
+    we stay silent; when it is enabled but the send did not go through, we warn.
+    """
+    try:
+        cfg = st.secrets.get("mailer") if hasattr(st, "secrets") else None
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):
+        return False
+    if not cfg:
+        return False
+    return bool(cfg.get("enabled", False))
+
+
 def _render_request_type_selector(session):
     """Render request type selectbox and look up the corresponding profile_id.
 
@@ -1008,6 +1024,53 @@ def forms():
             if _case_id:
                 st.toast(f"Solicitud creada. Case ID: {_case_id}", icon=":material/task_alt:")
 
+            # Phase 8: send the compliance notification email FIRST — before the
+            # slow Drive-upload and Sheets steps below. The notification used to
+            # run last; that long window between the DB commit and the send let a
+            # Streamlit rerun (e.g. an accidental double-submit) preempt the
+            # script mid-send, leaving the request saved but un-notified with no
+            # trace. Sending here shrinks that window to almost nothing. We also
+            # capture the result: any non-delivery leaves email_notified_at NULL
+            # (the retry sweep in app.py will redeliver) AND we warn the operator
+            # now so a missed notification is never invisible.
+            _notified = False
+            try:
+                from services.mailer import send_request_notification
+                _payload = _build_email_payload(
+                    case_id=_case_id,
+                    tipo_solicitud=tipo_solicitud,
+                    company_name=company_name,
+                    company_info=company_info,
+                    requested_by=requested_by,
+                    client_data=client_data,
+                    notes=notes,
+                )
+                _creator_email = st.session_state.get("_user_email") or submitted_by_email
+                _notified = send_request_notification(
+                    session=session,
+                    case_id=_case_id,
+                    payload=_payload,
+                    creator_email=_creator_email,
+                    submitted_by_email=submitted_by_email,
+                )
+            except MailerError as e:
+                logger.error("Mailer failed for case %s", _case_id, exc_info=True)
+                st.warning(sanitize_for_user(e))
+            except Exception:  # intentional-broad: defensive — the request has
+                # already been persisted; never surface an unexpected error from
+                # the notification path as if saving failed.
+                logger.exception("Unexpected mailer error for case %s", _case_id)
+            # Operator-visible warning when the mailer is enabled but the email
+            # did not go out (False return or any exception above). Silent when
+            # the mailer is intentionally disabled.
+            if _is_mailer_enabled() and not _notified:
+                st.warning(
+                    f"⚠️ La solicitud {_case_id or ''} se guardó, pero la "
+                    "notificación a compliance NO salió en este intento. El "
+                    "sistema reintentará automáticamente; si compliance no la "
+                    "recibe, repórtalo."
+                )
+
             # Phase 4: upload attachments (best-effort, errors per-file)
             if attachment_files:
                 try:
@@ -1087,42 +1150,9 @@ def forms():
                     extra={"case_id": _case_id, "request_id": request_id},
                 )
 
-            # Phase 8: send compliance notification email (best-effort).
-            # Local import keeps the hot path clean and avoids pulling SMTP
-            # code into modules that never submit a form. NOTE: when
-            # st.secrets["mailer"]["enabled"] is True in production, the
-            # Apps Script notifier attached to the Google Sheet must be
-            # disabled to avoid duplicate emails to compliance.
-            try:
-                from services.mailer import send_request_notification
-                _payload = _build_email_payload(
-                    case_id=_case_id,
-                    tipo_solicitud=tipo_solicitud,
-                    company_name=company_name,
-                    company_info=company_info,
-                    requested_by=requested_by,
-                    client_data=client_data,
-                    notes=notes,
-                )
-                _creator_email = st.session_state.get("_user_email") or submitted_by_email
-                send_request_notification(
-                    session=session,
-                    case_id=_case_id,
-                    payload=_payload,
-                    creator_email=_creator_email,
-                    submitted_by_email=submitted_by_email,
-                )
-            except MailerError as e:
-                logger.error("Mailer failed for case %s", _case_id, exc_info=True)
-                st.warning(sanitize_for_user(e))
-            except Exception:  # intentional-broad: defensive — the request
-                # has already been persisted successfully at this point; we
-                # must never surface an unexpected error from the notification
-                # path that would make the user think saving failed.
-                logger.exception("Unexpected mailer error for case %s", _case_id)
-                st.warning(
-                    "Solicitud guardada. Hubo un problema notificando a compliance por correo."
-                )
+            # (The compliance notification was already sent above, right after
+            # the request was saved — before the Drive/Sheets steps — so a rerun
+            # cannot preempt it mid-send.)
 
             session.close()
             st.success("Solicitud guardada correctamente")
