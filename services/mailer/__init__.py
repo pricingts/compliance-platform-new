@@ -30,12 +30,77 @@ from services.logging_config import get_logger
 from services.mailer import smtp_client
 from services.mailer.recipients import resolve_recipients
 from services.mailer.templates import render_request_email
-from utils.exceptions import MailerError
+from utils.exceptions import DelegationError, MailerError
 
 logger = get_logger(__name__)
 
 
-__all__ = ["send_request_notification", "MailerError"]
+__all__ = ["send_request_notification", "validate_mailer_config", "MailerError"]
+
+
+def _secrets_section(name: str):
+    """Return ``st.secrets[name]`` or None, swallowing the usual import/secret
+    lookup errors so this is safe to call outside a Streamlit runtime."""
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            return st.secrets.get(name)
+    except (ImportError, FileNotFoundError, KeyError, AttributeError):  # pragma: no cover
+        return None
+    return None
+
+
+def validate_mailer_config() -> dict:
+    """Validate mailer configuration at startup (call once from ``app.py``).
+
+    Does NOT raise — returns a structured result so the caller can surface a
+    misconfiguration at deploy/app-load time instead of letting it stay hidden
+    until the first request is submitted (the failure mode that left
+    notifications silently undelivered). Shape::
+
+        {"enabled": bool, "transport": "gmail"|"smtp", "ok": bool,
+         "problems": [str, ...]}
+
+    When the feature flag is off this is a no-op success (``ok=True``,
+    ``problems=[]``) because default-off is an intentional state.
+    """
+    import os
+
+    enabled = _is_feature_enabled()
+    transport = _resolve_transport()
+    problems: list[str] = []
+
+    if enabled:
+        if transport == "gmail":
+            creds = _secrets_section("google_sheets_credentials")
+            if not creds and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON"):
+                problems.append(
+                    "transport=gmail but no service-account credentials "
+                    "(st.secrets['google_sheets_credentials'] missing and "
+                    "GOOGLE_APPLICATION_CREDENTIALS_JSON unset) — Gmail DWD sends "
+                    "will fail at send time."
+                )
+        else:  # smtp
+            smtp_cfg = _secrets_section("smtp") or {}
+            host = smtp_cfg.get("host") if hasattr(smtp_cfg, "get") else None
+            user = smtp_cfg.get("username") if hasattr(smtp_cfg, "get") else None
+            pwd = smtp_cfg.get("password") if hasattr(smtp_cfg, "get") else None
+            if not (host or os.environ.get("SMTP_HOST")):
+                problems.append("transport=smtp but SMTP host is not configured.")
+            if not (user or os.environ.get("SMTP_USERNAME")):
+                problems.append("transport=smtp but SMTP username is not configured.")
+            if not (pwd or os.environ.get("SMTP_PASSWORD")):
+                problems.append("transport=smtp but SMTP password is not configured.")
+
+    result = {
+        "enabled": enabled,
+        "transport": transport,
+        "ok": not problems,
+        "problems": problems,
+    }
+    if problems:
+        logger.error("Mailer config validation found problems", extra=result)
+    return result
 
 
 def _is_feature_enabled() -> bool:
@@ -44,15 +109,21 @@ def _is_feature_enabled() -> bool:
     Default-off: if the secret section is missing or the flag is falsy, the
     mailer should not attempt to deliver anything.
     """
+    mailer_cfg = None
     try:
         import streamlit as st
-        mailer_cfg = st.secrets.get("mailer") if hasattr(st, "secrets") else None
+        if hasattr(st, "secrets"):
+            mailer_cfg = st.secrets.get("mailer")
     except (ImportError, FileNotFoundError, KeyError, AttributeError):  # pragma: no cover
-        # Streamlit missing or secrets not loaded — treat feature as disabled.
-        return False
-    if not mailer_cfg:
-        return False
-    return bool(mailer_cfg.get("enabled", False))
+        mailer_cfg = None
+    if mailer_cfg:
+        return bool(mailer_cfg.get("enabled", False))
+    # No Streamlit secrets available (e.g. a cron / backfill one-off running
+    # outside the app). Fall back to the MAILER_ENABLED env var so operational
+    # scripts can enable delivery explicitly. In the Streamlit app, secrets are
+    # present, so this branch never changes production behavior.
+    import os
+    return os.environ.get("MAILER_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _resolve_transport() -> str:
@@ -69,9 +140,12 @@ def _resolve_transport() -> str:
             cfg = st.secrets.get("mailer")
     except (ImportError, FileNotFoundError, KeyError, AttributeError):  # pragma: no cover
         cfg = None
-    transport = "smtp"
-    if cfg:
-        transport = cfg.get("transport", "smtp") or "smtp"
+    transport = cfg.get("transport") if cfg else None
+    if not transport:
+        # No secrets-configured transport (e.g. backfill one-off outside the
+        # app) — honor MAILER_TRANSPORT env, else default to smtp.
+        import os
+        transport = os.environ.get("MAILER_TRANSPORT", "smtp") or "smtp"
     if transport not in ("smtp", "gmail"):
         logger.warning(
             "Unknown mailer.transport=%r, falling back to smtp", transport
@@ -205,11 +279,24 @@ def send_request_notification(
     )
     message_id = _build_message_id(case_id)
 
-    references, in_reply_to, thread_id = _build_threading_headers(
-        session, request_id
-    )
-
     try:
+        # Threading headers read the email_threads table. A DB/session error
+        # here previously escaped send_request_notification as an opaque
+        # exception (it ran BEFORE this try). Keeping it inside the try and
+        # converting any failure to MailerError means the row stays
+        # un-notified (email_notified_at NULL) so the retry sweep re-attempts,
+        # instead of looking like a hard crash to the form.
+        try:
+            references, in_reply_to, thread_id = _build_threading_headers(
+                session, request_id
+            )
+        except MailerError:
+            raise
+        except Exception as e:  # noqa: BLE001 - DB/session error reading thread
+            raise MailerError(
+                f"threading-headers read failed for {case_id}: {e}"
+            ) from e
+
         if transport == "gmail":
             from services.mailer import gmail_client
             response = gmail_client.send_email(
@@ -233,6 +320,21 @@ def send_request_notification(
                 message_id=message_id,
             )
             gmail_thread_id = None
+    except DelegationError:
+        # Permanent: Gmail DWD is not authorized for this creator. Log loudly
+        # with creator + case so an operator can fix the scope in Google Admin
+        # Console; leave the row un-notified so the retry sweep redelivers once
+        # delegation is fixed.
+        logger.critical(
+            "send_request_notification: Gmail delegation failed — authorize "
+            "DWD in Admin Console; retry sweep will redeliver",
+            extra={
+                "case_id": case_id,
+                "request_id": request_id,
+                "creator_email": creator_email,
+            },
+        )
+        raise
     except MailerError:
         # Already logged inside the transport. Re-raise so the caller can decide.
         raise

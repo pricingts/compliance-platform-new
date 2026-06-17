@@ -24,7 +24,8 @@ from email.message import EmailMessage
 from typing import Any, Optional
 
 from services.logging_config import get_logger
-from utils.exceptions import DelegationError, MailerError
+from utils.exceptions import DelegationError, MailerError, TransientMailerError
+from utils.retry import with_retry
 
 logger = get_logger(__name__)
 
@@ -118,6 +119,7 @@ def _assemble_mime(
     return base64.urlsafe_b64encode(raw_bytes).decode("ascii")
 
 
+@with_retry(max_attempts=3, exceptions=(TransientMailerError,))
 def _send_via_gmail(
     creator_email: str,
     raw_b64: str,
@@ -126,10 +128,12 @@ def _send_via_gmail(
     """Do the Gmail API send call and classify ``HttpError`` responses.
 
     4xx responses specific to delegation (401 / 403) become
-    :class:`DelegationError`; every other ``HttpError`` is wrapped in
-    :class:`MailerError` with the upstream status code. Transient 5xx and
-    429 become ``MailerError`` too — the caller decides whether to retry
-    or fall back to SMTP.
+    :class:`DelegationError` (PERMANENT — never retried). Transient 5xx and
+    429 become :class:`TransientMailerError`, which the ``@with_retry``
+    decorator retries up to 3 times with exponential backoff before giving
+    up. Every other ``HttpError`` becomes a plain :class:`MailerError`
+    (not retried). This mirrors the SMTP transport, which already retries
+    transient connection-level failures.
     """
     from googleapiclient.errors import HttpError
 
@@ -149,7 +153,7 @@ def _send_via_gmail(
                 "the service account client_id in Google Admin Console."
             ) from e
         if status in (500, 502, 503, 504, 429):
-            raise MailerError(
+            raise TransientMailerError(
                 f"Gmail API transient error ({status}): {e}"
             ) from e
         raise MailerError(f"Gmail API error ({status}): {e}") from e
