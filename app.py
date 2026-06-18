@@ -113,26 +113,20 @@ if _last_run is None or (_utc_now() - _last_run) > _td(minutes=5):
         # reminders module itself is broken — either way, just log.
         logger.exception("Reminder dispatch failed on page load: %s", _rem_err)
 
-# Redeliver any mailer-era request whose creation notification never went out
-# (e.g. a rerun preempted the send on a double-submit, or a transient transport
-# error). Gated to once every 5 minutes per session like reminders.
-# send_request_notification is idempotent (it skips already-notified rows), so
-# this is safe to run repeatedly. A scheduled Railway job is recommended for
-# coverage when no one is logged in (see plan); this page-load sweep guarantees
-# recovery whenever the app is in use.
-_pending_last_run_key = "_pending_notif_last_run"
-_pending_last_run = st.session_state.get(_pending_last_run_key)
-if _pending_last_run is None or (_utc_now() - _pending_last_run) > _td(minutes=5):
-    try:
-        from services.mailer.pending import retry_pending_notifications
-        _pn_session = SessionLocal()
-        try:
-            retry_pending_notifications(_pn_session)
-        finally:
-            _pn_session.close()
-        st.session_state[_pending_last_run_key] = _utc_now()
-    except (SQLAlchemyError, ImportError) as _pn_err:
-        logger.exception("Pending-notification sweep failed on page load: %s", _pn_err)
+# NOTE: a page-load "retry pending notifications" sweep was intentionally
+# REMOVED here. Running it on every app load re-sent notifications on each
+# restart and, under concurrent/near-simultaneous loads, double/triple-sent
+# (it only marks email_notified_at AFTER the slow Gmail send, with no lock, so
+# parallel loads each picked the same NULL rows). It also could not time-bound
+# itself because requests.created_at is NULL platform-wide, so it kept
+# re-picking old un-notified rows forever. Prevention now lives in the request
+# form (the compliance email is sent immediately after the row is committed,
+# before the slow Drive/Sheets steps, and the operator is warned if it does not
+# go out). Deliberate, one-off recovery is available via
+# scripts/backfill_notifications.py (idempotent, dry-run by default) — never
+# automatically on app load. A safe automatic retry would first require a
+# reliable created_at DEFAULT and a per-row attempts/last-tried column plus an
+# atomic claim, run from a single scheduled job (not per page load).
 
 # --- Navigation (only rendered when authenticated) ---
 pages_compliance = [
